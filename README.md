@@ -43,7 +43,16 @@ export AJAN_DIL=en        # English messages (default: Turkish)
 baton --help
 ```
 
-The `ln` step is needed because Claude Code does not put a plugin's `bin/` on `PATH`. If `~/.local/bin` is not on your `PATH`, add it. Restart Claude Code, then ask:
+The `ln` step is needed because Claude Code does not put a plugin's `bin/` on `PATH`. If `~/.local/bin` is not on your `PATH`, add it.
+
+Then allow Gemini to write inside your project, once per project (it backs up agy's `settings.json` first):
+
+```bash
+cd your-project
+baton perms check --write "$PWD" --add-perms
+```
+
+Without this rule the subagent stops with `İZİN GEREKLİ` (permission needed) and tells you the exact rule to add; it never grants permissions on its own. Restart Claude Code, then ask:
 
 ```text
 /baton:devret Add input validation to src/parser.py so empty strings raise ValueError; verify with: python3 -m pytest tests/test_parser.py

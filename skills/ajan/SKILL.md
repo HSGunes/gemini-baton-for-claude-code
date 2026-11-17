@@ -1,6 +1,6 @@
 ---
 name: ajan
-description: Gemini alt ajanı (agy CLI üzerinde `baton` aracı, eski adı `ajan`). Uygulama işini Gemini'ye devretmek, durumunu izlemek, aynı konuşmada düzeltme istemek ve sonucu doğrulamak için kullan. Kullanıcı "geminiye ver", "hydrogen'e ver", "flash'a ver", "alt ajana ver", "delege et" dediğinde ya da büyük/tekrarlı uygulama işinde.
+description: Gemini alt ajanı (agy CLI üzerinde `baton` aracı, eski adı `ajan`). Uygulama işini Gemini'ye devretmek, durumunu izlemek, aynı konuşmada düzeltme istemek ve sonucu doğrulamak için kullan. Kullanıcı "geminiye ver", "hydrogen'e ver", "flash'a ver", "alt ajana ver", "delege et", "delegate to Gemini", "give this to Gemini", "hand off to a sub-agent", "use hydrogen", "use Gemini for implementation" dediğinde ya da büyük/tekrarlı uygulama işinde.
 ---
 
 # ajan — Gemini alt ajanı ile çalışma

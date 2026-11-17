@@ -42,7 +42,16 @@ ln -sfn "$(ls -d ~/.claude/plugins/cache/gemini-baton/baton/* | sort -V | tail -
 baton --help
 ```
 
-`ln` adımı gerekli, çünkü Claude Code eklentinin `bin/` dizinini `PATH`'e eklemez. `~/.local/bin` `PATH`'te değilse ekleyin. Claude Code'u yeniden başlattıktan sonra şunu yaz:
+`ln` adımı gerekli, çünkü Claude Code eklentinin `bin/` dizinini `PATH`'e eklemez. `~/.local/bin` `PATH`'te değilse ekleyin.
+
+Sonra Gemini'nin projene yazmasına izin ver; bu her proje için bir kez yapılır ve önce agy'nin `settings.json` dosyasının yedeği alınır:
+
+```bash
+cd projen
+baton izin kontrol --yaz "$PWD" --izin-ekle
+```
+
+Bu kural yoksa alt ajan `İZİN GEREKLİ` ile durur ve eklenmesi gereken kuralı tam olarak yazar; izni hiçbir zaman kendi başına eklemez. Claude Code'u yeniden başlattıktan sonra şunu yaz:
 
 ```text
 /baton:devret src/parser.py'ye girdi doğrulaması ekle; boş metin ValueError fırlatsın. Doğrulama: python3 -m pytest tests/test_parser.py

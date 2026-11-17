@@ -13,6 +13,8 @@ Eksikse kod tabanından çıkar (oku, ara); tahmin ettiğin her şeyi raporda "v
 
 ## Akış
 1. İlgili dosyaları oku. Görev dosyasını yaz: `<proje>/.ajan/GOREV_<ETIKET>.md` (dizin yoksa oluştur).
+   Proje bir git deposuysa ve `.git/info/exclude` içinde yoksa sonuna `.ajan/` satırını ekle (Bash ile),
+   böylece görev dosyaları kullanıcının `git status` çıktısını kirletmez.
    İçerik: bağlam, okunacak dosyalar, değiştirilecek dosyalar, imzalar, kabul ölçütleri,
    "başka dosyaya dokunma", "testleri gevşetme". Bu dosya dışında hiçbir dosyaya Write ile yazma.
 2. Başlat: `baton baslat ETIKET -g <görev dosyası> --yaz <yalnız değişecek dar dizin> [--oku <dizin>]`

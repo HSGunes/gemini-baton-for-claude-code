@@ -95,6 +95,8 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "report_changed_files": "\nDeğişen / Yazılan Dosyalar:",
         "report_tests": "\nÇalıştırılan Testler / Komutlar:",
         "report_open_issues": "\nAçık Konular:",
+        "report_error": "\nHata:\n  {err}",
+        "hint_invalid_model": "Kullanılabilir modelleri görmek için: agy models; farklı model için --model",
         "none_item": "  - Yok",
         "yes": "Evet",
         "no": "Hayır",
@@ -156,6 +158,8 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "report_changed_files": "\nChanged / Written Files:",
         "report_tests": "\nExecuted Tests / Commands:",
         "report_open_issues": "\nOpen Issues:",
+        "report_error": "\nError:\n  {err}",
+        "hint_invalid_model": "Run 'agy models' to list available models; choose one with --model",
         "none_item": "  - None",
         "yes": "Yes",
         "no": "No",
@@ -689,6 +693,46 @@ def get_last_error_from_log(hata_path: str) -> str | None:
         return None
 
 
+def extract_result_error(res: Any, ev: Any = None) -> str:
+    """result olayındaki error alanını düz metin olarak çıkarır."""
+    raw = res.get("error") if isinstance(res, dict) else None
+    if raw is None and isinstance(ev, dict):
+        raw = ev.get("error")
+    if raw is None:
+        return ""
+    if isinstance(raw, dict):
+        msg = (
+            raw.get("message")
+            or raw.get("error")
+            or json.dumps(raw, ensure_ascii=False)
+        )
+        return str(msg).strip()
+    return str(raw).strip()
+
+
+def is_invalid_model_error(
+    task_dir: str, meta: dict[str, Any] | None, durum: str | None = None
+) -> bool:
+    """Görevin geçersiz model nedeniyle hata verip vermediğini kontrol eder."""
+    effective_durum = (
+        durum if durum is not None else (meta.get("durum") if meta else None)
+    )
+    if effective_durum != "hata":
+        return False
+    hata_str = str(meta.get("hata") or "") if meta else ""
+    if "invalid model" in hata_str.lower():
+        return True
+    hata_path = os.path.join(task_dir, "hata.log")
+    if os.path.isfile(hata_path):
+        try:
+            with open(hata_path, "r", encoding="utf-8", errors="replace") as f:
+                if "invalid model" in f.read().lower():
+                    return True
+        except OSError:
+            pass
+    return False
+
+
 def extract_dogrulama_ozet(cikti: str, limit: int = 5) -> str:
     """
     Doğrulama komutu çıktısından ilk FAILED/Error satırlarını özet olarak çıkarır.
@@ -861,6 +905,7 @@ def run_bekci(etiket: str) -> None:
     final_response = ""
     result_status = None
     result_duration = None
+    result_error = ""
 
     yazilan_dosyalar: list[str] = list(meta.get("yazilan_dosyalar", []))
     calistirilan_komutlar: list[str] = list(meta.get("calistirilan_komutlar", []))
@@ -942,6 +987,9 @@ def run_bekci(etiket: str) -> None:
             if cid:
                 meta["conversation_id"] = cid
             result_status = res.get("status")
+            extracted_err = extract_result_error(res, ev)
+            if extracted_err:
+                result_error = extracted_err
             final_response = res.get("response", "") or ""
             result_duration = res.get("duration_seconds")
             usage = res.get("usage")
@@ -966,9 +1014,34 @@ def run_bekci(etiket: str) -> None:
             meta["durum"] = "bitti"
         else:
             meta["durum"] = "hata"
+            if result_error:
+                try:
+                    needs_nl = (
+                        os.path.isfile(hata_path)
+                        and os.path.getsize(hata_path) > 0
+                    )
+                    if needs_nl:
+                        with open(hata_path, "rb") as hf_check:
+                            hf_check.seek(-1, os.SEEK_END)
+                            needs_nl = hf_check.read(1) != b"\n"
+                    with open(hata_path, "a", encoding="utf-8") as hf:
+                        if needs_nl:
+                            hf.write("\n")
+                        hf.write(result_error + "\n")
+                except OSError:
+                    pass
+            first_err_line = next(
+                (ln.strip() for ln in result_error.splitlines() if ln.strip()),
+                "",
+            )
             last_err = get_last_error_from_log(hata_path)
             if result_status and result_status != "SUCCESS":
-                meta["hata"] = str(result_status)
+                if first_err_line:
+                    meta["hata"] = f"{result_status}: {first_err_line}"
+                else:
+                    meta["hata"] = str(result_status)
+            elif first_err_line:
+                meta["hata"] = first_err_line
             elif last_err:
                 meta["hata"] = last_err
             elif agy_proc.returncode not in (0, None):
@@ -1576,6 +1649,8 @@ def wait_for_tasks(
                     sure=sure,
                 )
             )
+            if is_invalid_model_error(task_dir, meta, durum=st):
+                print(tr("hint_invalid_model"))
         elif st == "kayip":
             all_bitti = False
             print(tr("wait_lost", etiket=etiket))
@@ -1601,6 +1676,18 @@ def cmd_bekle(args: argparse.Namespace) -> None:
     sys.exit(code)
 
 
+def _print_report_error_details(
+    task_dir: str, meta: dict[str, Any] | None
+) -> None:
+    """Görev hata durumundaysa rapor çıktısına hata ve model ipucunu ekler."""
+    if not meta or meta.get("durum") != "hata":
+        return
+    if meta.get("hata"):
+        print(tr("report_error", err=meta["hata"]))
+    if is_invalid_model_error(task_dir, meta):
+        print(tr("hint_invalid_model"))
+
+
 def cmd_rapor(args: argparse.Namespace) -> None:
     etiket = args.etiket
     state_root = get_state_root()
@@ -1618,9 +1705,11 @@ def cmd_rapor(args: argparse.Namespace) -> None:
             print(tr("no_response_yet"))
         return
 
+    meta = load_meta(task_dir)
     rapor_path = os.path.join(task_dir, "rapor.json")
     if not os.path.exists(rapor_path):
         print(tr("no_report_yet"))
+        _print_report_error_details(task_dir, meta)
         return
 
     try:
@@ -1665,6 +1754,8 @@ def cmd_rapor(args: argparse.Namespace) -> None:
             print(f"  - {a}")
     else:
         print(tr("none_item"))
+
+    _print_report_error_details(task_dir, meta)
 
 
 def cmd_izle(args: argparse.Namespace) -> None:
@@ -1898,18 +1989,19 @@ def main() -> None:
 
     # 1. baslat
     p_baslat = subparsers.add_parser(
-        "baslat", help="Yeni bir ajan görevi başlat"
+        "baslat", aliases=["start"], help="Yeni bir ajan görevi başlat"
     )
     p_baslat.add_argument("etiket", help="Görev etiketi")
     g_input = p_baslat.add_mutually_exclusive_group(required=True)
     g_input.add_argument(
         "-g",
         "--gorev-dosyalari",
+        "--task-files",
         action="extend",
         nargs="+",
         help="Görev metnini içeren dosyalar",
     )
-    g_input.add_argument("-m", "--mesaj", help="Görev metni")
+    g_input.add_argument("-m", "--mesaj", "--message", help="Görev metni")
     p_baslat.add_argument(
         "--model",
         default="hydrogen",
@@ -1922,50 +2014,56 @@ def main() -> None:
     )
     p_baslat.add_argument(
         "--yaz",
+        "--write",
         action="append",
         default=[],
         help="Yazma izni verilecek dizin (--add-dir eklenir)",
     )
     p_baslat.add_argument(
         "--oku",
+        "--read",
         action="append",
         default=[],
         help="Okuma izni verilecek dizin (--add-dir eklenir)",
     )
     p_baslat.add_argument(
         "--komut",
+        "--allow-cmd",
         action="append",
         default=[],
         help="Çalıştırılabilecek komut öneki",
     )
     p_baslat.add_argument(
-        "--sure", help="Maksimum süre (ör. 30m, 1h, 1800s)"
+        "--sure", "--max-time", help="Maksimum süre (ör. 30m, 1h, 1800s)"
     )
     p_baslat.add_argument(
         "--sandbox", action="store_true", help="Sandbox modunu etkinleştir"
     )
     p_baslat.add_argument(
         "--izin-ekle",
+        "--add-perms",
         action="store_true",
         help="Eksik izinleri settings.json'a otomatik ekle",
     )
     p_baslat.add_argument(
-        "--bekle", action="store_true", help="Görev bitene kadar bekle"
+        "--bekle", "--wait", action="store_true", help="Görev bitene kadar bekle"
     )
 
     # 2. devam
     p_devam = subparsers.add_parser(
-        "devam", help="Mevcut göreve yeni turla devam et"
+        "devam", aliases=["continue"], help="Mevcut göreve yeni turla devam et"
     )
     p_devam.add_argument("etiket", help="Görev etiketi")
-    p_devam.add_argument("-m", "--mesaj", required=True, help="Takip mesajı")
     p_devam.add_argument(
-        "--bekle", action="store_true", help="Görev bitene kadar bekle"
+        "-m", "--mesaj", "--message", required=True, help="Takip mesajı"
+    )
+    p_devam.add_argument(
+        "--bekle", "--wait", action="store_true", help="Görev bitene kadar bekle"
     )
 
     # 3. durum
     p_durum = subparsers.add_parser(
-        "durum", help="Görev durumlarını görüntüle"
+        "durum", aliases=["status"], help="Görev durumlarını görüntüle"
     )
     p_durum.add_argument("etiket", nargs="?", help="Görev etiketi")
     p_durum.add_argument(
@@ -1974,55 +2072,65 @@ def main() -> None:
 
     # 4. bekle
     p_bekle = subparsers.add_parser(
-        "bekle", help="Görevlerin bitmesini bekle"
+        "bekle", aliases=["wait"], help="Görevlerin bitmesini bekle"
     )
     p_bekle.add_argument(
         "etiketler", nargs="*", help="Beklenecek görev etiketleri"
     )
     p_bekle.add_argument(
-        "--zaman-asimi", type=float, help="Zaman aşımı süresi (saniye)"
+        "--zaman-asimi", "--timeout", type=float, help="Zaman aşımı süresi (saniye)"
     )
 
     # 5. rapor
     p_rapor = subparsers.add_parser(
-        "rapor", help="Görev raporunu veya ham yanıtı göster"
+        "rapor", aliases=["report"], help="Görev raporunu veya ham yanıtı göster"
     )
     p_rapor.add_argument("etiket", help="Görev etiketi")
     p_rapor.add_argument(
-        "--ham", action="store_true", help="Ham yanıtı (yanit.md) göster"
+        "--ham", "--raw", action="store_true", help="Ham yanıtı (yanit.md) göster"
     )
 
     # 6. izle
     p_izle = subparsers.add_parser(
-        "izle", help="Görev olay akışını canlı takip et"
+        "izle", aliases=["watch"], help="Görev olay akışını canlı takip et"
     )
     p_izle.add_argument("etiket", help="Görev etiketi")
 
     # 7. iptal
-    p_iptal = subparsers.add_parser("iptal", help="Çalışan bir görevi iptal et")
+    p_iptal = subparsers.add_parser(
+        "iptal", aliases=["cancel"], help="Çalışan bir görevi iptal et"
+    )
     p_iptal.add_argument("etiket", help="Görev etiketi")
 
     # 8. temizle
-    p_temizle = subparsers.add_parser("temizle", help="Eski görevleri temizle")
+    p_temizle = subparsers.add_parser(
+        "temizle", aliases=["clean"], help="Eski görevleri temizle"
+    )
     p_temizle.add_argument(
         "--gun",
+        "--days",
         type=int,
         default=7,
         help="Kaç günden eski görevlerin temizleneceği (varsayılan: 7)",
     )
 
     # 9. izin
-    p_izin = subparsers.add_parser("izin", help="İzin yönetimi")
+    p_izin = subparsers.add_parser(
+        "izin", aliases=["perms"], help="İzin yönetimi"
+    )
     izin_sub = p_izin.add_subparsers(dest="izin_command", required=True)
-    p_izin_kontrol = izin_sub.add_parser("kontrol", help="İzinleri denetle")
-    p_izin_kontrol.add_argument(
-        "--yaz", action="append", default=[], help="Yazma izni dizini"
+    p_izin_kontrol = izin_sub.add_parser(
+        "kontrol", aliases=["check"], help="İzinleri denetle"
     )
     p_izin_kontrol.add_argument(
-        "--komut", action="append", default=[], help="Komut öneki"
+        "--yaz", "--write", action="append", default=[], help="Yazma izni dizini"
+    )
+    p_izin_kontrol.add_argument(
+        "--komut", "--allow-cmd", action="append", default=[], help="Komut öneki"
     )
     p_izin_kontrol.add_argument(
         "--izin-ekle",
+        "--add-perms",
         action="store_true",
         help="Eksik izinleri otomatik ekle",
     )
@@ -2030,6 +2138,7 @@ def main() -> None:
     # 10. dogrula
     p_dogrula = subparsers.add_parser(
         "dogrula",
+        aliases=["verify"],
         help="Otomatik test ve düzeltme döngüsü ile görevi doğrula",
     )
     p_dogrula.add_argument("etiket", help="Görev etiketi")
@@ -2038,6 +2147,7 @@ def main() -> None:
     )
     p_dogrula.add_argument(
         "--tur",
+        "--rounds",
         type=int,
         default=3,
         help="Maksimum düzeltme turu sayısı; test en fazla N+1 kez çalıştırılır (varsayılan: 3)",
@@ -2047,6 +2157,7 @@ def main() -> None:
     )
     p_dogrula.add_argument(
         "--zaman-asimi",
+        "--timeout",
         type=float,
         help="Komut zaman aşımı süresi (saniye)",
     )
@@ -2057,26 +2168,30 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.command == "baslat":
-        cmd_baslat(args)
-    elif args.command == "devam":
-        cmd_devam(args)
-    elif args.command == "dogrula":
-        cmd_dogrula(args)
-    elif args.command == "durum":
-        cmd_durum(args)
-    elif args.command == "bekle":
-        cmd_bekle(args)
-    elif args.command == "rapor":
-        cmd_rapor(args)
-    elif args.command == "izle":
-        cmd_izle(args)
-    elif args.command == "iptal":
-        cmd_iptal(args)
-    elif args.command == "temizle":
-        cmd_temizle(args)
-    elif args.command == "izin":
-        if args.izin_command == "kontrol":
+    command_handlers = {
+        "baslat": cmd_baslat,
+        "start": cmd_baslat,
+        "devam": cmd_devam,
+        "continue": cmd_devam,
+        "dogrula": cmd_dogrula,
+        "verify": cmd_dogrula,
+        "durum": cmd_durum,
+        "status": cmd_durum,
+        "bekle": cmd_bekle,
+        "wait": cmd_bekle,
+        "rapor": cmd_rapor,
+        "report": cmd_rapor,
+        "izle": cmd_izle,
+        "watch": cmd_izle,
+        "iptal": cmd_iptal,
+        "cancel": cmd_iptal,
+        "temizle": cmd_temizle,
+        "clean": cmd_temizle,
+    }
+    if args.command in command_handlers:
+        command_handlers[args.command](args)
+    elif args.command in ("izin", "perms"):
+        if args.izin_command in ("kontrol", "check"):
             cmd_izin_kontrol(args)
     elif args.command == "_bekci":
         run_bekci(args.etiket)

@@ -1751,3 +1751,320 @@ def test_varsayilan_model_cli_uzerinden_hydrogen(test_env: dict[str, Any]) -> No
     argv = calls[0]["argv"]
     m_idx = argv.index("--model")
     assert argv[m_idx + 1] == "gemini-4-hydrogen-xhigh"
+
+
+# ---------------------------------------------------------------------------
+# Görev C: agy Hata Ayrıntısı, İngilizce Komut/Bayraklar ve SKILL.md
+# ---------------------------------------------------------------------------
+def test_result_error_ayrintisi_hata_log_ve_invalid_model_ipucu(
+    test_env: dict[str, Any], tmp_path: Any
+) -> None:
+    """
+    result olayındaki 'error' alanı meta['hata']'ya '<status>: <ilk satır>' olarak yazılmalı,
+    tam metin hata.log'a eklenmeli ve 'invalid model' içeren hatalarda bekle/rapor çıktısında
+    TR/EN model ipucu gösterilmelidir.
+    """
+    custom_agy = tmp_path / "model_err_agy.py"
+    custom_agy.write_text(
+        """#!/usr/bin/env python3
+import json, os, sys
+case = os.environ.get("ERR_CASE", "invalid_model")
+print(json.dumps({"event": "init", "conversation_id": "conv-err-1", "init": {"model": "x"}}), flush=True)
+if case == "invalid_model":
+    err_text = (
+        'invalid model selection (--model "x" ...): model x is not recognized\\n'
+        "Available models:\\n"
+        "  gemini-4-hydrogen-xhigh\\n"
+        "  gemini-3.8-flash-high"
+    )
+    print(json.dumps({"event": "result", "result": {"conversation_id": "conv-err-1", "status": "ERROR", "error": err_text}}), flush=True)
+    sys.exit(1)
+elif case == "other_error":
+    err_text = "quota exceeded for project\\nRetry after 60s"
+    print(json.dumps({"event": "result", "result": {"conversation_id": "conv-err-1", "status": "ERROR", "error": err_text}}), flush=True)
+    sys.exit(1)
+""",
+        encoding="utf-8",
+    )
+    custom_agy.chmod(custom_agy.stat().st_mode | stat.S_IEXEC)
+
+    env = dict(test_env["env"])
+    env["AJAN_AGY"] = str(custom_agy)
+    state_dir = test_env["state_dir"]
+
+    # 1. Geçersiz model hatası: meta['hata'], hata.log ve TR ipucu
+    env["ERR_CASE"] = "invalid_model"
+    res_tr = run_ajan(
+        ["baslat", "gecersiz_model", "-m", "test", "--model", "x", "--bekle"],
+        env=env,
+    )
+    assert res_tr.returncode == 1
+
+    tdir = state_dir / "gecersiz_model"
+    meta = json.loads((tdir / "meta.json").read_text(encoding="utf-8"))
+    assert meta["durum"] == "hata"
+    assert meta["hata"] == 'ERROR: invalid model selection (--model "x" ...): model x is not recognized'
+
+    hata_log = (tdir / "hata.log").read_text(encoding="utf-8")
+    assert "Available models:" in hata_log
+    assert "gemini-3.8-flash-high" in hata_log
+
+    tr_hint = "Kullanılabilir modelleri görmek için: agy models; farklı model için --model"
+    en_hint = "Run 'agy models' to list available models; choose one with --model"
+
+    assert tr_hint in res_tr.stdout
+
+    res_bekle = run_ajan(["bekle", "gecersiz_model"], env=env)
+    assert res_bekle.returncode == 1
+    assert tr_hint in res_bekle.stdout
+
+    res_rapor = run_ajan(["rapor", "gecersiz_model"], env=env)
+    assert res_rapor.returncode == 0
+    assert tr_hint in res_rapor.stdout
+
+    # 2. İngilizce ipucu (AJAN_DIL=en)
+    env_en = dict(env, AJAN_DIL="en")
+    res_wait_en = run_ajan(["wait", "gecersiz_model"], env=env_en)
+    assert res_wait_en.returncode == 1
+    assert en_hint in res_wait_en.stdout
+
+    res_report_en = run_ajan(["report", "gecersiz_model"], env=env_en)
+    assert res_report_en.returncode == 0
+    assert en_hint in res_report_en.stdout
+
+    # 3. Model dışı hata: yine ilk satır meta['hata'] ve tam metin hata.log'da, ancak model ipucu yok
+    env["ERR_CASE"] = "other_error"
+    res_other = run_ajan(
+        ["baslat", "baska_hata", "-m", "test", "--bekle"], env=env
+    )
+    assert res_other.returncode == 1
+    tdir2 = state_dir / "baska_hata"
+    meta2 = json.loads((tdir2 / "meta.json").read_text(encoding="utf-8"))
+    assert meta2["hata"] == "ERROR: quota exceeded for project"
+    assert "Retry after 60s" in (tdir2 / "hata.log").read_text(encoding="utf-8")
+    assert tr_hint not in res_other.stdout
+    res_rapor2 = run_ajan(["rapor", "baska_hata"], env=env)
+    assert tr_hint not in res_rapor2.stdout
+
+
+def test_ingilizce_alt_komutlar_ve_bayrak_esdegerleri(
+    test_env: dict[str, Any], tmp_path: Any
+) -> None:
+    """
+    İngilizce alt komut takma adları ve bayrak eşdeğerlerinin sahte agy üzerinde
+    uçtan uca çalıştığını doğrular.
+    """
+    env = dict(test_env["env"])
+    state_dir = test_env["state_dir"]
+    log_path = test_env["log_path"]
+    settings_path = test_env["settings_path"]
+
+    write_dir = tmp_path / "en_write_dir"
+    read_dir = tmp_path / "en_read_dir"
+    write_dir.mkdir(parents=True, exist_ok=True)
+    read_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. perms check --write (izin yokken çıkış 2)
+    res_perm_missing = run_ajan(
+        ["perms", "check", "--write", str(write_dir)], env=env
+    )
+    assert res_perm_missing.returncode == 2
+    assert f"write_file({write_dir.resolve()})" in res_perm_missing.stderr
+
+    # 2. perms check --write --allow-cmd --add-perms
+    res_perm_add = run_ajan(
+        [
+            "perms",
+            "check",
+            "--write",
+            str(write_dir),
+            "--allow-cmd",
+            "pytest -q",
+            "--add-perms",
+        ],
+        env=env,
+    )
+    assert res_perm_add.returncode == 0
+    settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert f"write_file({write_dir.resolve()})" in settings_data["permissions"]["allow"]
+    assert "command(pytest -q)" in settings_data["permissions"]["allow"]
+
+    # 3. start + --message + --write + --wait
+    res_start = run_ajan(
+        [
+            "start",
+            "en_task_1",
+            "--message",
+            "Implement feature in English",
+            "--write",
+            str(write_dir),
+            "--read",
+            str(read_dir),
+            "--allow-cmd",
+            "pytest -q",
+            "--max-time",
+            "10m",
+            "--wait",
+        ],
+        env=env,
+    )
+    assert res_start.returncode == 0, res_start.stderr
+
+    meta1 = json.loads((state_dir / "en_task_1" / "meta.json").read_text(encoding="utf-8"))
+    assert meta1["durum"] == "bitti"
+    assert meta1["sure"] == "10m"
+    assert str(write_dir.resolve()) in meta1["yaz"]
+    assert str(read_dir.resolve()) in meta1["oku"]
+    assert "pytest -q" in meta1["komut"]
+
+    calls = [json.loads(line) for line in open(log_path, encoding="utf-8") if line.strip()]
+    assert "--print-timeout" in calls[0]["argv"]
+    assert calls[0]["argv"][calls[0]["argv"].index("--print-timeout") + 1] == "10m"
+
+    # 4. status
+    res_status = run_ajan(["status", "en_task_1", "--json"], env=env)
+    assert res_status.returncode == 0
+    assert json.loads(res_status.stdout)["durum"] == "bitti"
+
+    # 5. report ve report --raw
+    res_report = run_ajan(["report", "en_task_1"], env=env)
+    assert res_report.returncode == 0
+    assert "Sonuç başarılı." in res_report.stdout
+
+    res_report_raw = run_ajan(["report", "en_task_1", "--raw"], env=env)
+    assert res_report_raw.returncode == 0
+    assert "Görev tamamlandı." in res_report_raw.stdout
+
+    # 6. continue + --message + --wait
+    res_cont = run_ajan(
+        ["continue", "en_task_1", "--message", "Follow up", "--wait"], env=env
+    )
+    assert res_cont.returncode == 0, res_cont.stderr
+    meta1_after = json.loads((state_dir / "en_task_1" / "meta.json").read_text(encoding="utf-8"))
+    assert meta1_after["tur"] == 2
+
+    # 7. verify --rounds (hem geçen hem kalan)
+    res_verify_ok = run_ajan(
+        [
+            "verify",
+            "en_task_1",
+            "--test",
+            f"{sys.executable} -c 'exit(0)'",
+            "--rounds",
+            "1",
+            "--timeout",
+            "5",
+        ],
+        env=env,
+    )
+    assert res_verify_ok.returncode == 0
+    assert "DOGRULANDI" in res_verify_ok.stdout
+
+    res_verify_fail = run_ajan(
+        [
+            "verify",
+            "en_task_1",
+            "--test",
+            f"{sys.executable} -c 'exit(1)'",
+            "--rounds",
+            "1",
+        ],
+        env=env,
+    )
+    assert res_verify_fail.returncode == 1
+    assert "DOGRULANAMADI (1 tur)" in res_verify_fail.stdout
+
+    # 8. watch (bitmiş görevde olayları okuyup çıkar)
+    res_watch = run_ajan(["watch", "en_task_1"], env=env, timeout=4.0)
+    assert res_watch.returncode == 0
+    assert "BAŞLANGIÇ" in res_watch.stdout
+
+    # 9. start --task-files --wait
+    task_file = tmp_path / "en_task.md"
+    task_file.write_text("TASK_FROM_FILE_EN", encoding="utf-8")
+    res_tf = run_ajan(
+        ["start", "en_task_file", "--task-files", str(task_file), "--wait"],
+        env=env,
+    )
+    assert res_tf.returncode == 0
+    assert "TASK_FROM_FILE_EN" in (state_dir / "en_task_file" / "GEMINI.md").read_text(
+        encoding="utf-8"
+    )
+
+    # 10. wait --timeout ve cancel (uyuyan görevde)
+    env_sleep = dict(env, FAKE_AGY_MODE="sleep")
+    res_sleep = run_ajan(
+        ["start", "en_sleep_task", "--message", "Sleep"], env=env_sleep
+    )
+    assert res_sleep.returncode == 0
+    time.sleep(0.6)
+
+    res_wait_to = run_ajan(
+        ["wait", "en_sleep_task", "--timeout", "0.2"], env=env_sleep
+    )
+    assert res_wait_to.returncode == 1
+
+    res_cancel = run_ajan(["cancel", "en_sleep_task"], env=env_sleep)
+    assert res_cancel.returncode == 0
+    meta_sleep = json.loads(
+        (state_dir / "en_sleep_task" / "meta.json").read_text(encoding="utf-8")
+    )
+    assert meta_sleep["durum"] == "iptal"
+
+    # 11. clean --days
+    old_dir = state_dir / "en_old_task"
+    old_dir.mkdir(parents=True, exist_ok=True)
+    (old_dir / "meta.json").write_text(
+        json.dumps({"etiket": "en_old_task", "durum": "bitti"}), encoding="utf-8"
+    )
+    old_ts = time.time() - (10 * 86400)
+    os.utime(old_dir, (old_ts, old_ts))
+
+    res_clean = run_ajan(["clean", "--days", "7"], env=env)
+    assert res_clean.returncode == 0
+    assert not old_dir.exists()
+
+
+def test_skill_md_frontmatter_tr_ve_en_tetikleyiciler() -> None:
+    """
+    skills/ajan/SKILL.md frontmatter description alanı mevcut Türkçe tetikleyicileri
+    ve istenen İngilizce tetikleyicileri tek satır geçerli YAML string olarak içermelidir.
+    """
+    skill_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "skills", "ajan", "SKILL.md")
+    )
+    content = open(skill_path, "r", encoding="utf-8").read()
+    lines = content.splitlines()
+    assert lines[0].strip() == "---"
+    end_idx = lines.index("---", 1)
+    fm_lines = lines[1:end_idx]
+
+    desc_lines = [ln for ln in fm_lines if ln.startswith("description:")]
+    assert len(desc_lines) == 1
+    desc_line = desc_lines[0]
+    raw_val = desc_line[len("description:") :].strip()
+
+    # Tek satır YAML string (çok satırlı | veya > blok olmamalı)
+    assert raw_val not in ("|", ">", "|-", ">-")
+    assert raw_val
+    # Tırnak içine alınmamış YAML değerinde ": " bulunmamalı
+    if not (
+        (raw_val.startswith('"') and raw_val.endswith('"'))
+        or (raw_val.startswith("'") and raw_val.endswith("'"))
+    ):
+        assert ": " not in raw_val
+
+    for trigger in [
+        "geminiye ver",
+        "hydrogen'e ver",
+        "flash'a ver",
+        "alt ajana ver",
+        "delege et",
+        "delegate to Gemini",
+        "give this to Gemini",
+        "hand off to a sub-agent",
+        "use hydrogen",
+        "use Gemini for implementation",
+    ]:
+        assert trigger in desc_line
+
