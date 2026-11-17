@@ -30,7 +30,7 @@ Sen ─▶ Claude Code            planlar, görev dosyasını yazar, senin testl
 - Claude Code (eklenti için)
 - `PATH` üzerinde, oturumu açık `agy` (Google Antigravity CLI)
 - Python 3.10+
-- Linux. macOS büyük ihtimalle çalışır (POSIX süreç grupları) ama denenmedi. Windows desteklenmiyor.
+- Linux ya da macOS (CI test paketini ikisinde de Python 3.10–3.13 ile çalıştırıyor). Windows desteklenmiyor.
 
 ## Hızlı başlangıç
 

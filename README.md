@@ -30,7 +30,7 @@ You ─▶ Claude Code            plans, writes the task file, verifies with you
 - Claude Code (for the plugin)
 - Google Antigravity CLI `agy` on `PATH`, signed in
 - Python 3.10+
-- Linux. macOS should work (POSIX process groups) but is untested. Windows is not supported.
+- Linux or macOS (CI runs the test suite on both, Python 3.10–3.13). Windows is not supported.
 
 ## Quick start
 
