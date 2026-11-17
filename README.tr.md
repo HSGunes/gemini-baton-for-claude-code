@@ -1,241 +1,148 @@
-# Gemini Baton for Claude Code
+# gemini-baton-for-claude-code
 
-**Claude yönetir, Gemini kodlar.** Uygulama işini Gemini alt ajanına (Google'ın `agy` / Antigravity CLI'ı üzerinden) devreden bir Claude Code eklentisi; plan, kabul ölçütleri ve son doğrulama Claude'da kalır.
+[![Tests](https://github.com/HSGunes/gemini-baton-for-claude-code/actions/workflows/tests.yml/badge.svg)](https://github.com/HSGunes/gemini-baton-for-claude-code/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Neden:
-- **Claude kullanımını korur.** Ağır iş (kod yazma, hatalarda yineleme) Gemini'de; Claude yalnız planlar ve denetler.
-- **Güven ama doğrula.** Claude, Gemini'nin değişikliklerine karşı *senin* testlerini çalıştırır; alt ajanın raporu kanıt sayılmaz.
-- **Bağlamı koruyarak düzeltme.** Başarısız mı? `devam` aynı Gemini konuşmasını sürdürür; `dogrula` test → düzeltme döngüsünü otomatik yürütür.
-- **Varsayılan olarak güvenli.** Gemini yalnız izin verdiğin dizinlere yazar; `--dangerously-skip-permissions` yok.
-- **Sıfır bağımlılık.** Tek Python 3.10+ dosyası, yalnız standart kütüphane, sahte `agy` ile 26 test.
+Gemini Baton, kodlama işlerini Google'ın `agy` (Antigravity) CLI'ı üzerinden bir Gemini alt ajanına veren bir Claude Code eklentisidir. Plan ve son kontrol Claude'da kalır.
+
+Claude görevi ve kabul ölçütlerini yazar. Gemini işi arka planda uygular, Claude da sonucu **senin** testlerinle sınar. Testler kalırsa hata aynı Gemini konuşmasına gönderilir ve orada düzeltilir. Token'ın büyük kısmını harcayan iş Claude kullanımından değil, Gemini kotandan düşer. Bir istem gönderip yanıtı okuyan tek seferlik köprülerden farkı şu: Baton yazma izni olan uzun görevleri yönetir. İzinleri baştan denetler, durumu saklar, konuşmayı sürdürür ve test → düzeltme döngüsünü çalıştırır.
+
+[English README](README.md)
 
 ```text
-Sen ─▶ Claude Code (planla, doğrula)
-          └─▶ baton:ajan-yonetici (Sonnet, döngüyü yürütür)   [isteğe bağlı]
-                 └─▶ baton CLI ─▶ agy ─▶ Gemini (uygular)
+Sen ─▶ Claude Code            planlar, görev dosyasını yazar, senin testlerinle doğrular
+         └─▶ baton:ajan-yonetici   isteğe bağlı Sonnet alt ajanı, döngünün tamamını yürütür
+               └─▶ baton CLI ─▶ agy ─▶ Gemini   arka planda uygular
 ```
 
-> Komut `baton` (eski takma ad `ajan`).
+## Özellikler
 
----
+- **Arka plan görevleri.** `baslat` hemen döner, `bekle` görev bitene kadar bekler. Bu sırada Claude başka işlere bakabilir.
+- **Senin testlerinle doğrulama.** `dogrula --test "<komut>"` testi çalıştırır ve hatayı `--tur` kez Gemini'ye geri gönderir.
+- **Bağlamı koruyarak devam.** `devam` aynı Gemini konuşmasını sürdürür (`--conversation <id>`).
+- **Dar yazma izni.** Gemini yalnız `--yaz` ile verilen dizinlere yazabilir. Eksik izin kuralı olursa görev, token harcanmadan çıkış 2 ile durur.
+- **Varsayılan sandbox.** `--komut` verilmezse terminal kapalıdır (`--sandbox`).
+- **Claude bağlamını şişirmez.** `rapor` kısa bir özet basar; isteğe bağlı alt ajan döngünün tamamını ana oturumun dışında tutar.
+- **Sıfır bağımlılık.** Tek Python 3.10+ dosyası, yalnız standart kütüphane. 26 test sahte bir `agy` ile çalışır.
 
-## 1. Ne İşe Yarar
+## Gereksinimler
 
-Çoklu ajan ve eşli programlama (pair-programming) iş akışlarında, ana orkestratör (örneğin Claude Code veya bir yazılımcı) mimariyi tasarlar, kabul ölçütlerini belirler ve testleri yürütür; kodlama, yeniden düzenleme veya düzeltme işlerini ise alt ajana delege eder.
+- Claude Code (eklenti için)
+- `PATH` üzerinde, oturumu açık `agy` (Google Antigravity CLI)
+- Python 3.10+
+- Linux. macOS büyük ihtimalle çalışır (POSIX süreç grupları) ama denenmedi. Windows desteklenmiyor.
 
-`ajan` bu işleyişi şu özelliklerle sağlar:
-- **Doğrudan CLI Çağrısı:** Doğrudan `agy` ikilisini `--output-format stream-json` ile çalıştırır; IDE eklentisi veya harici sunucu katmanı gerektirmez.
-- **Süreç Grubu Yalıtımı:** Görevleri arka planda bağımsız süreç gruplarında (`start_new_session`) yönetir; SIGTERM yanıt vermezse 5 saniye sonra SIGKILL ile sonlandırır.
-- **İzin Ön Denetimi:** `settings.json` izin kurallarını başlatmadan önce kontrol eder; eksik izin nedeniyle görevin başarısız olmasını önler.
-- **Durum Yönetimi ve Bağlam Koruma:** `conversation_id` değerini turlar arasında korur; ajanın aynı bağlamda düzeltme yapmasını sağlar.
-- **Otomatik Test ve Doğrulama Döngüsü:** Yerleşik `dogrula` komutu ile yerel testleri çalıştırır; başarısızlık durumunda çıktıyı ajana geri besleyerek düzeltme turlarını otomatik yürütür.
+## Hızlı başlangıç
 
----
-
-## 2. Kurulum
-
-### Claude Code eklentisi olarak (önerilen)
 ```bash
 claude plugin marketplace add HSGunes/gemini-baton-for-claude-code
 claude plugin install baton@gemini-baton
-```
-Eklentide şunlar var:
-- `ajan` skill'i — devret → bekle → doğrula → devam akışı,
-- `baton:ajan-yonetici` alt ajanı — tüm döngüyü daha ucuz bir modelde yürütür, kısa ve kanıtlı sonuç döndürür; ana oturumun bağlamı küçük kalır,
-- `/baton:devret <iş>` komutu — işi bu alt ajana verir,
-- `bin/baton` başlatıcısı — `baton` CLI'ı (`python3` 3.10+ ve `PATH` üzerinde `agy` gerekir).
-
-Claude Code eklentinin `bin/` dizinini `PATH`'e eklemez; kurulumdan sonra bir kez bağla:
-```bash
 ln -sfn "$(ls -d ~/.claude/plugins/cache/gemini-baton/baton/* | sort -V | tail -1)/bin/baton" ~/.local/bin/baton
+baton --help
 ```
-(Bir klondan çalışıyorsan `<klon>/bin/baton`'ı bağla; güncellemeler anında geçerli olur.)
 
-### Bağımsız CLI
+`ln` adımı gerekli, çünkü Claude Code eklentinin `bin/` dizinini `PATH`'e eklemez. Claude Code'u yeniden başlattıktan sonra şunu yaz:
+
+```text
+/baton:devret src/parser.py'ye girdi doğrulaması ekle; boş metin ValueError fırlatsın. Doğrulama: python3 -m pytest tests/test_parser.py
+```
+
+Claude işi `baton:ajan-yonetici` alt ajanına verir. Alt ajan görev dosyasını yazar, Gemini'yi başlatır, bekler, testi kendisi çalıştırır ve `BAŞARILI`, `BAŞARISIZ` ya da `İZİN GEREKLİ` sonucunu değişen dosyalar ve test çıktısıyla birlikte döndürür.
+
+## Kullanım
+
+### Claude Code içinden
+
+| Ne yaparsın | Ne olur |
+|---|---|
+| `/baton:devret <iş>` | Alt ajan döngünün tamamını yürütür ve kısa, kanıtlı bir sonuç döndürür. |
+| Claude'a "bunu Gemini'ye ver" dersin | `ajan` skill'i devreye girer ve Claude döngüyü kendisi yürütür. |
+| Birbirinden bağımsız birkaç iş verirsin | Claude bunları paralel başlatır. Skill, aynı dosyalara dokunan işleri aynı anda çalıştırmamasını söyler. |
+
+### Terminalden
+
 ```bash
-python3 ajan.py --help     # kurulumsuz
-pip install .              # `ajan` komutunu kaydeder
+# 1. Görevi arka planda başlat (Gemini yalnız ./src içine yazabilir)
+baton baslat parser-fix -m "parse() boş girdide ValueError fırlatsın" --yaz ./src --model flash
+
+# 2. Bitmesini bekle
+baton bekle parser-fix
+
+# 3. Kısa raporu oku: özet, değişen dosyalar, açık konular
+baton rapor parser-fix
+
+# 4a. Testler kaldıysa aynı konuşmada devam et
+baton devam parser-fix -m "tests/test_parser.py::test_empty hâlâ KeyError veriyor. Kök nedeni düzelt, testleri gevşetme." --bekle
+
+# 4b. Ya da test → düzeltme döngüsünü baton'a bırak
+baton dogrula parser-fix --test "python3 -m pytest tests/test_parser.py" --tur 2
 ```
 
-### Geliştirme
-```bash
-python3 -m pytest          # sahte agy kullanır; gerçek CLI çağrılmaz
-claude plugin validate --strict .
-```
+Uzun işlerde bağlamı bir Markdown dosyasına yazıp `-g` ile ver (örnek: [examples/GOREV_ORNEK.md](examples/GOREV_ORNEK.md)).
 
----
+## Komutlar
 
-## 3. Ortam Değişkenleri
+| Komut | Seçenekler |
+|---|---|
+| `baslat <etiket>` | `-g DOSYA...` ya da `-m METİN`, `--model`, `--effort`, `--yaz DİZİN`, `--oku DİZİN`, `--komut ÖNEK`, `--sure 30m`, `--sandbox`, `--izin-ekle`, `--bekle` |
+| `bekle [<etiket>...]` | `--zaman-asimi SANİYE` |
+| `durum [<etiket>]` | `--json` |
+| `rapor <etiket>` | `--ham` (ham yanıt) |
+| `devam <etiket>` | `-m METİN` (zorunlu), `--bekle` |
+| `dogrula <etiket>` | `--test KOMUT`, `--tur N` (varsayılan 3), `--cwd DİZİN`, `--zaman-asimi SANİYE` |
+| `izle <etiket>` | canlı olay akışı |
+| `iptal <etiket>` | SIGTERM, 5 sn sonra SIGKILL |
+| `temizle` | `--gun GÜN` (varsayılan 7) |
+| `izin kontrol` | `--yaz`, `--komut`, `--izin-ekle` |
 
-| Değişken | Varsayılan Değer | Açıklama |
+Model takma adları: `flash` → `gemini-3.8-flash-high` (varsayılan), `flash-orta` → `gemini-3.8-flash-medium`, `argon` → `gemini-4-argon-high`, `argon-orta` → `gemini-4-argon-medium`. İstersen tam model kimliğini de verebilirsin.
+
+## Yapılandırma
+
+| Değişken | Varsayılan | Amaç |
 |---|---|---|
-| `AJAN_AGY` | `agy` (PATH üzerinde) | Çağrılacak `agy` çalıştırılabilir ikilisinin yolu |
-| `AJAN_DIZIN` | `$XDG_STATE_HOME/ajan` veya `~/.local/state/ajan` | Görevlerin saklandığı durum kök dizini |
-| `AJAN_AYAR` | `~/.gemini/antigravity-cli/settings.json` | Gemini izin ayar dosyası |
-| `AJAN_DIL` | `tr` | Çıktı ve ileti dili (`tr`: Türkçe, `en`: İngilizce) |
+| `AJAN_DIL` | `tr` | İleti ve istem dili: `tr` ya da `en` |
+| `AJAN_AGY` | `agy` | `agy` ikilisinin yolu |
+| `AJAN_DIZIN` | `$XDG_STATE_HOME/ajan` ya da `~/.local/state/ajan` | Görev durum dizini |
+| `AJAN_AYAR` | `~/.gemini/antigravity-cli/settings.json` | agy izin dosyası |
 
----
+## İzinler
 
-## 4. İzin Modeli
+`agy` izin listesini `settings.json` dosyasından okur:
 
-Gemini / Antigravity izinleri `settings.json` içerisinde şu biçimde tanımlanır:
 ```json
-{
-  "permissions": {
-    "allow": [
-      "write_file(/proje/dizini)",
-      "command(pytest)",
-      "command(git diff)"
-    ]
-  }
-}
+{ "permissions": { "allow": ["write_file(/mutlak/yol/proje/src)", "command(python3 -m pytest)"] } }
 ```
 
-- **Yazma İzni:** `write_file(<mutlak_dizin>)` kuralı belirtilen dizini ve altındaki tüm alt dosya/klasörleri kapsar.
-- **Komut İzni:** `command(<önek>)` kuralı komut önekleriyle birebir eşleşir.
-- **Ön Denetim:** `ajan baslat` çalıştırıldığında `--yaz` ve `--komut` parametrelerinin `settings.json` tarafından kapsanıp kapsanmadığı denetlenir. Eksik izin varsa program **çıkış kodu 2** ile durur ve eklenmesi gereken kuralları listeler.
-- **Otomatik İzin Ekleme:** `--izin-ekle` bayrağı verilirse, mevcut `settings.json` dosyası `settings.json.bak-<zaman>` olarak yedeklenir ve eksik kurallar otomatik eklenerek göreve başlanır.
-- **Sandbox Modu:** Komut listesi boşsa (`--komut` verilmemişse), terminal kapatılarak `--sandbox` modu otomatik uygulanır.
+`baton baslat`, her `--yaz` dizininin ve `--komut` önekinin bu listede olup olmadığını denetler. Eksik kural varsa çıkış 2 ile durur ve eklenmesi gereken kuralları yazar. `--izin-ekle` önce zaman damgalı bir yedek alır, sonra eksik kuralları ekler. `settings.json` geçerli JSON değilse dosyaya dokunulmaz ve komut hata verir.
 
----
+## Token'ı düşük tutmak
 
-## 5. stream-json ve Conversation Yapısı
+- Her `devam` turu tüm Gemini konuşmasını yeniden okur; ikinci tur çoğu zaman ilkinden pahalıdır. `dogrula --tur` değerini düşük tut. Konuşma uzadıysa teşhisi yazıp yeni görev aç.
+- Mekanik işlerde `--model flash-orta` kullan; daha az thinking token harcar.
+- Claude tarafında `izle` ya da `rapor --ham` yerine `rapor` kullan.
+- `agy`, global olarak etkin MCP sunucularını ve tüm araç setini her göreve yükler; bunu hesaba kat.
 
-`ajan`, arka plan bekçi süreci (`_bekci`) üzerinden `agy`'yi `--output-format stream-json` ile yönetir:
+## Sınırlamalar
 
-1. **`init` Olayı:** Oturum parametrelerini kaydeder ve `conversation_id` kimliğini alır.
-2. **`step_update` Olayı:** Canlı adım akışını izler:
-   - Dosya yazma araçları (`write_file`, `edit_file` vb.) tespit edildiğinde yazılan dosyalar `meta.json` içine eklenir.
-   - Komut çalıştırma araçları (`run_command`) tespit edildiğinde çalıştırılan komutlar kaydedilir.
-   - Token harcamaları (`input_tokens`, `output_tokens`, `total_tokens`) kümülatif güncellenir.
-3. **`result` Olayı:** Nihai durum kodunu, yanıt metnini ve süreyi yakalar.
-4. **Bağlam Koruma:** `devam` çağrıldığında veya `dogrula` turlarında `agy`'ye `--conversation <conversation_id>` aktarılarak aynı bağlam korunur.
+- Yerelde kurulu ve oturumu açık bir `agy` gerekir. Görevler aynı makinede çalışır; uzak makinede çalıştırma desteği yok.
+- `durum` çıktısındaki token sayısı girdi ve çıktıyı kapsar; cache okumaları görünmez.
+- Anthropic ya da Google ile bağlantılı değildir.
 
----
+## Geliştirme
 
-## 6. Tipik Orkestratör Döngüsü
-
-Birincil orkestratörün (ör. Claude Code) Gemini alt ajanını yönlendirdiği standart akış şöyledir:
-
-```
-[Claude Code] ──► 1. Görev Hazırla & Başlat ──► [ajan baslat ETIKET ...]
-                        │
-                        ▼
-                  2. Bitişi Bekle           ──► [ajan bekle ETIKET] (arka plan)
-                        │
-                        ▼
-                  3. Özeti / Raporu İncele  ──► [ajan rapor ETIKET]
-                        │
-                        ▼
-                  4. Testleri Doğrula       ──► (Yerel test çalıştırma)
-                        │
-                 ┌──────┴──────┐
-              Geçti          Kaldı
-                 │             │
-                 ▼             ▼
-              [Bitti]    5. Geri Besleme     ──► [ajan devam ETIKET -m "..."]
-                                                 (veya otomatik: ajan dogrula)
-```
-
-1. **Başlatma (`baslat`):**
-   ```bash
-   ajan baslat gorev1 -m "Ayrıştırıcı mantığını refaktör et" --yaz /proje/src --komut "pytest"
-   ```
-2. **Bekleme (`bekle`):**
-   ```bash
-   ajan bekle gorev1
-   ```
-3. **Raporlama (`rapor`):**
-   ```bash
-   ajan rapor gorev1
-   ```
-4. **Bağımsız Doğrulama Testi:**
-   Orkestratör testleri kendisi çalıştırır.
-5. **Düzeltme / Döngü (`devam` veya `dogrula`):**
-   Test başarısız olursa aynı bağlamda devam ettirilir:
-   ```bash
-   ajan devam gorev1 -m "42. satırda KeyError alındı. Testleri gevşetmeden kök nedeni düzelt." --bekle
-   ```
-   Veya otomatik sınama ve düzeltme döngüsü:
-   ```bash
-   ajan dogrula gorev1 --test "pytest tests/test_parser.py" --tur 3
-   ```
-
----
-
-## 7. Komut Referansı
-
-### `baslat`
-Yeni bir arka plan alt ajan görevi başlatır.
 ```bash
-ajan baslat <etiket> (-g <gorev_dosyasi...> | -m <mesaj>) [--model <model>] [--effort <effort>] [--yaz <dizin>] [--komut <önek>] [--sure <sure>] [--sandbox] [--izin-ekle] [--bekle]
-```
-- Desteklenen model takma adları: `flash` (`gemini-3.8-flash-high`), `flash-orta` (`gemini-3.8-flash-medium`), `argon` (`gemini-4-argon-high`), `argon-orta` (`gemini-4-argon-medium`) veya tam model kimlikleri.
-
-### `devam`
-Önceki turun konuşma bağlamını koruyarak yeni bir tur başlatır.
-```bash
-ajan devam <etiket> -m <takip_mesaji> [--bekle]
+git clone https://github.com/HSGunes/gemini-baton-for-claude-code.git
+cd gemini-baton-for-claude-code
+python3 -m pytest                    # sahte agy; gerçek CLI hiç çağrılmaz
+claude plugin validate --strict .
+ln -sfn "$PWD/bin/baton" ~/.local/bin/baton   # klonu doğrudan kullan
 ```
 
-### `dogrula`
-Belirtilen yerel test komutunu çalıştırır; başarısız olursa çıktıyı ajana ileterek en fazla `--tur` adedince otomatik düzeltme döngüsü yürütür.
-```bash
-ajan dogrula <etiket> --test "<komut>" [--tur <maks_tur>] [--cwd <calisma_dizini>] [--zaman-asimi <saniye>]
-```
+Eklenti olmadan da kullanılabilir: `python3 ajan.py --help` kurulum gerektirmez; `pip install .` ise `baton` ve `ajan` komutlarını kaydeder.
 
-### `durum`
-Tüm görevlerin veya tek bir görevin tablosal veya JSON özetini verir.
-```bash
-ajan durum [<etiket>] [--json]
-```
+Issue ve pull request'ler açık. Davranış değiştiren her değişiklik için bir test ekle.
 
-### `bekle`
-Belirtilen görevler tamamlanana kadar bekler. Hepsi başarılı bittiyse `0`, aksi halde `1` döner.
-```bash
-ajan bekle [<etiket>...] [--zaman-asimi <saniye>]
-```
+## Lisans
 
-### `rapor`
-Ajanın oluşturduğu yapılandırılmış JSON raporunu veya ham yanıtını gösterir.
-```bash
-ajan rapor <etiket> [--ham]
-```
-
-### `izle`
-Canlı olay akışını (`olaylar.jsonl`) terminalde takip eder.
-```bash
-ajan izle <etiket>
-```
-
-### `iptal`
-Çalışan bir göreve önce `SIGTERM`, 5 saniye içinde kapanmazsa `SIGKILL` göndererek sonlandırır.
-```bash
-ajan iptal <etiket>
-```
-
-### `temizle`
-Belirtilen günden daha eski tamamlanmış görev kayıtlarını siler (varsayılan: 7 gün).
-```bash
-ajan temizle [--gun <gun_sayisi>]
-```
-
-### `izin kontrol`
-`settings.json` izinlerini görev başlatmadan bağımsız denetler.
-```bash
-ajan izin kontrol [--yaz <dizin>] [--komut <önek>] [--izin-ekle]
-```
-
----
-
-## 8. Sınırlamalar
-
-- **Yerel `agy` CLI Zorunluluğu:** Ortamda Google Antigravity (`agy`) CLI ikilisinin kurulu ve kimlik doğrulaması yapılmış olması gerekir.
-- **Tek Makine / Yerel Süreç Sınırı:** Süreç yönetimi yerel süreç grupları (`killpg`) üzerinedir; ağ üzerinden dağıtık düğüm yönetimini içermez.
-- **Sandbox Sınırları:** Komut çalıştırma izni verildiğinde `settings.json` dosyasına ilgili izin kurallarının eklenmiş olması zorunludur.
-
----
-
-## 9. Lisans
-
-MIT — bkz. [LICENSE](LICENSE).
+[MIT](LICENSE)
