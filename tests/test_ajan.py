@@ -1580,9 +1580,14 @@ def test_is_pid_alive_zombi_ve_cocuk_toplama(tmp_path: Any) -> None:
     """
     # 1. Doğrudan çocuk zombi (waitpid ile toplanır)
     child = subprocess.Popen([sys.executable, "-c", "pass"])
-    # Çocuğun çıkmasını, onu toplamadan bekle (WNOWAIT): zombi olarak kalır. Taşınabilir, /proc gerekmez.
-    os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
+    # Çıkan çocuk zombi kalır; is_pid_alive onu waitpid ile toplayıp False dönmeli.
+    # Toplamasaydı os.kill(pid, 0) zombide başarılı olur ve (/proc yoksa) hep True dönerdi.
+    deadline = time.time() + 15.0
+    while is_pid_alive(child.pid) and time.time() < deadline:
+        time.sleep(0.05)
     assert is_pid_alive(child.pid) is False
+    with pytest.raises(ChildProcessError):
+        os.waitpid(child.pid, os.WNOHANG)  # zaten toplanmış olmalı
 
     # 2. Çocuk olmayan zombi: yalnız /proc/<pid>/stat ile görülebilir (Linux).
     if not os.path.exists("/proc/self/stat"):
