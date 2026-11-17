@@ -1,8 +1,21 @@
-# `ajan` — Gemini (agy CLI) Sub-Agent Orchestrator
+# Gemini Baton for Claude Code
 
-`ajan` is a lightweight orchestration utility designed to launch, monitor, continue, and verify background sub-agent tasks using Google Gemini (via the `agy` CLI). It is specifically tailored for AI orchestrators such as **Claude Code** or automated CI/local workflows that delegate implementation tasks to Gemini sub-agents.
+**Claude conducts, Gemini codes.** A Claude Code plugin that hands implementation work to a Gemini sub-agent (via Google's `agy` / Antigravity CLI) while Claude keeps the plan, the acceptance criteria and the final verification.
 
-> **Architecture Note:** `ajan.py` is a single file. It contains no third-party dependencies and runs on Python 3.10+ using only standard library modules.
+Why:
+- **Save your Claude usage.** The heavy lifting (writing code, iterating on failures) runs on Gemini; Claude only plans and checks.
+- **Trust, but verify.** Claude runs *your* tests against Gemini's changes; the sub-agent's own report is never taken as proof.
+- **Fix in context.** Failed? `devam` continues the same Gemini conversation, or `dogrula` loops test → fix automatically.
+- **Safe by default.** Gemini may only write to the directories you allow; no `--dangerously-skip-permissions`.
+- **Zero dependencies.** One Python 3.10+ file, standard library only, 26 tests with a fake `agy`.
+
+```text
+You ─▶ Claude Code (plan, verify)
+          └─▶ baton:ajan-yonetici (Sonnet, runs the loop)   [optional]
+                 └─▶ baton CLI ─▶ agy ─▶ Gemini (implements)
+```
+
+> The CLI is `baton` (legacy alias `ajan`); subcommands are Turkish for now: `baslat` start, `bekle` wait, `durum` status, `rapor` report, `devam` continue, `dogrula` verify, `iptal` cancel, `temizle` clean.
 
 ---
 
@@ -23,20 +36,20 @@ In multi-agent and pair-programming workflows, a primary planner (e.g. Claude Co
 
 ### As a Claude Code plugin (recommended)
 ```bash
-claude plugin marketplace add HSGunes/ajan
-claude plugin install ajan@ajan
+claude plugin marketplace add HSGunes/gemini-baton-for-claude-code
+claude plugin install baton@gemini-baton
 ```
 The plugin ships:
 - `ajan` skill — the delegate → wait → verify → continue workflow,
-- `ajan:ajan-yonetici` subagent — runs the whole loop on a cheaper model and returns a short, evidence-backed result, keeping the main session's context small,
-- `/ajan:devret <task>` command — hands a task to that subagent,
-- `bin/ajan` launcher — the `ajan` CLI (requires `python3` 3.10+ and `agy` on `PATH`).
+- `baton:ajan-yonetici` subagent — runs the whole loop on a cheaper model and returns a short, evidence-backed result, keeping the main session's context small,
+- `/baton:devret <task>` command — hands a task to that subagent,
+- `bin/baton` launcher — the `baton` CLI (requires `python3` 3.10+ and `agy` on `PATH`).
 
 Claude Code does not put the plugin's `bin/` on `PATH`; link it once after installing:
 ```bash
-ln -sfn "$(ls -d ~/.claude/plugins/cache/ajan/ajan/* | sort -V | tail -1)/bin/ajan" ~/.local/bin/ajan
+ln -sfn "$(ls -d ~/.claude/plugins/cache/gemini-baton/baton/* | sort -V | tail -1)/bin/baton" ~/.local/bin/baton
 ```
-(When working from a clone, link `<clone>/bin/ajan` instead so updates apply immediately.)
+(When working from a clone, link `<clone>/bin/baton` instead so updates apply immediately.)
 
 ### Standalone CLI
 ```bash

@@ -1,12 +1,15 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "ajan",
-  "description": "Gemini (agy CLI) sub-agent orchestrator for Claude Code.",
-  "owner": { "name": "HSGunes", "url": "https://github.com/HSGunes" },
+  "name": "gemini-baton",
+  "description": "Gemini Baton for Claude Code: Claude plans & verifies, Gemini (agy) implements.",
+  "owner": {
+    "name": "HSGunes",
+    "url": "https://github.com/HSGunes"
+  },
   "plugins": [
     {
-      "name": "ajan",
-      "description": "Delegate implementation work to a Gemini sub-agent via agy; Claude plans and verifies.",
+      "name": "baton",
+      "description": "Claude Code plans & verifies, Gemini (agy CLI) implements: sub-agent orchestrator.",
       "source": "./",
       "category": "productivity"
     }

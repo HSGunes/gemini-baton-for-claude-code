@@ -1,25 +1,30 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
-  "name": "ajan",
-  "version": "0.2.3",
-  "description": "Delegate implementation work from Claude Code to a Gemini sub-agent (agy CLI): start in background, wait, verify with your own tests, continue in the same conversation.",
+  "name": "baton",
+  "version": "0.3.0",
+  "description": "Claude Code plans & verifies, Gemini (agy CLI) implements: a sub-agent orchestrator plugin. Start Gemini tasks in the background, wait, run your own tests, continue in the same conversation; saves Claude usage.",
   "author": {
     "name": "HSGunes",
     "url": "https://github.com/HSGunes"
   },
   "license": "MIT",
   "keywords": [
-    "agy",
-    "antigravity",
+    "claude-code",
+    "claude-code-plugin",
     "gemini",
-    "sub-agent",
-    "delegate",
-    "orchestration"
+    "antigravity",
+    "agy",
+    "subagent",
+    "multi-agent",
+    "orchestration",
+    "delegate"
   ],
   "skills": [
     "./skills/ajan"
   ],
   "commands": [
     "./commands/devret.md"
-  ]
+  ],
+  "homepage": "https://github.com/HSGunes/gemini-baton-for-claude-code",
+  "repository": "https://github.com/HSGunes/gemini-baton-for-claude-code"
 }

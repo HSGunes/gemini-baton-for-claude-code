@@ -1,8 +1,21 @@
-# `ajan` — Gemini (agy CLI) Alt Ajan Yöneticisi
+# Gemini Baton for Claude Code
 
-`ajan`, Google Gemini (`agy` CLI) üzerinde arka planda alt ajan görevleri başlatmak, izlemek, aynı bağlamda devam ettirmek ve yapılandırılmış raporlar üretmek için geliştirilmiş hafif bir orkestrasyon aracıdır. Özellikle **Claude Code** veya yerel/otomasyon orkestratörlerinin uygulama işlerini Gemini alt ajanlarına devretmesi için optimize edilmiştir.
+**Claude yönetir, Gemini kodlar.** Uygulama işini Gemini alt ajanına (Google'ın `agy` / Antigravity CLI'ı üzerinden) devreden bir Claude Code eklentisi; plan, kabul ölçütleri ve son doğrulama Claude'da kalır.
 
-> **Mimari Notu:** `ajan.py` tek dosyadır. Hiçbir üçüncü taraf bağımlılığı yoktur; Python 3.10+ ve yalnızca standart kütüphane modülleri ile çalışır.
+Neden:
+- **Claude kullanımını korur.** Ağır iş (kod yazma, hatalarda yineleme) Gemini'de; Claude yalnız planlar ve denetler.
+- **Güven ama doğrula.** Claude, Gemini'nin değişikliklerine karşı *senin* testlerini çalıştırır; alt ajanın raporu kanıt sayılmaz.
+- **Bağlamı koruyarak düzeltme.** Başarısız mı? `devam` aynı Gemini konuşmasını sürdürür; `dogrula` test → düzeltme döngüsünü otomatik yürütür.
+- **Varsayılan olarak güvenli.** Gemini yalnız izin verdiğin dizinlere yazar; `--dangerously-skip-permissions` yok.
+- **Sıfır bağımlılık.** Tek Python 3.10+ dosyası, yalnız standart kütüphane, sahte `agy` ile 26 test.
+
+```text
+Sen ─▶ Claude Code (planla, doğrula)
+          └─▶ baton:ajan-yonetici (Sonnet, döngüyü yürütür)   [isteğe bağlı]
+                 └─▶ baton CLI ─▶ agy ─▶ Gemini (uygular)
+```
+
+> Komut `baton` (eski takma ad `ajan`).
 
 ---
 
@@ -23,20 +36,20 @@
 
 ### Claude Code eklentisi olarak (önerilen)
 ```bash
-claude plugin marketplace add HSGunes/ajan
-claude plugin install ajan@ajan
+claude plugin marketplace add HSGunes/gemini-baton-for-claude-code
+claude plugin install baton@gemini-baton
 ```
 Eklentide şunlar var:
 - `ajan` skill'i — devret → bekle → doğrula → devam akışı,
-- `ajan:ajan-yonetici` alt ajanı — tüm döngüyü daha ucuz bir modelde yürütür, kısa ve kanıtlı sonuç döndürür; ana oturumun bağlamı küçük kalır,
-- `/ajan:devret <iş>` komutu — işi bu alt ajana verir,
-- `bin/ajan` başlatıcısı — `ajan` CLI'ı (`python3` 3.10+ ve `PATH` üzerinde `agy` gerekir).
+- `baton:ajan-yonetici` alt ajanı — tüm döngüyü daha ucuz bir modelde yürütür, kısa ve kanıtlı sonuç döndürür; ana oturumun bağlamı küçük kalır,
+- `/baton:devret <iş>` komutu — işi bu alt ajana verir,
+- `bin/baton` başlatıcısı — `baton` CLI'ı (`python3` 3.10+ ve `PATH` üzerinde `agy` gerekir).
 
 Claude Code eklentinin `bin/` dizinini `PATH`'e eklemez; kurulumdan sonra bir kez bağla:
 ```bash
-ln -sfn "$(ls -d ~/.claude/plugins/cache/ajan/ajan/* | sort -V | tail -1)/bin/ajan" ~/.local/bin/ajan
+ln -sfn "$(ls -d ~/.claude/plugins/cache/gemini-baton/baton/* | sort -V | tail -1)/bin/baton" ~/.local/bin/baton
 ```
-(Bir klondan çalışıyorsan `<klon>/bin/ajan`'ı bağla; güncellemeler anında geçerli olur.)
+(Bir klondan çalışıyorsan `<klon>/bin/baton`'ı bağla; güncellemeler anında geçerli olur.)
 
 ### Bağımsız CLI
 ```bash

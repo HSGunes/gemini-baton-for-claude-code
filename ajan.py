@@ -1723,7 +1723,7 @@ def cmd_izin_kontrol(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="ajan - Gemini (agy CLI) alt ajan yöneticisi", prog="ajan"
+        description="ajan - Gemini (agy CLI) alt ajan yöneticisi", prog="baton"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
