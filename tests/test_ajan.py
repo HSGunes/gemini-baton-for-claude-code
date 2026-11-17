@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import stat
 import subprocess
 import sys
@@ -18,21 +17,15 @@ import pytest
 import ajan
 from ajan import (
     DEFAULT_MODEL,
-    MODEL_ALIASES,
     add_permissions,
-    check_permissions,
-    extract_command,
     extract_dogrulama_ozet,
     extract_file_path,
     extract_rapor,
-    get_lang,
-    get_last_error_from_log,
     get_settings_path,
     get_state_root,
     is_pid_alive,
     path_covers,
     resolve_model,
-    tr,
 )
 
 AJAN_PY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ajan.py"))

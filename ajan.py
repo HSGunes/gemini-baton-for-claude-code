@@ -1380,7 +1380,6 @@ def cmd_durum(args: argparse.Namespace) -> None:
             continue
 
         durum = meta.get("durum", "bilinmiyor")
-        pid = meta.get("pid")
         if durum == "calisiyor" and not gorev_canli(meta):
             durum = "kayip"
 
