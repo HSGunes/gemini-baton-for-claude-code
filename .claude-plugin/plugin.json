@@ -1,0 +1,25 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "ajan",
+  "version": "0.2.3",
+  "description": "Delegate implementation work from Claude Code to a Gemini sub-agent (agy CLI): start in background, wait, verify with your own tests, continue in the same conversation.",
+  "author": {
+    "name": "HSGunes",
+    "url": "https://github.com/HSGunes"
+  },
+  "license": "MIT",
+  "keywords": [
+    "agy",
+    "antigravity",
+    "gemini",
+    "sub-agent",
+    "delegate",
+    "orchestration"
+  ],
+  "skills": [
+    "./skills/ajan"
+  ],
+  "commands": [
+    "./commands/devret.md"
+  ]
+}
