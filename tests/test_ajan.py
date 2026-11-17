@@ -1580,19 +1580,13 @@ def test_is_pid_alive_zombi_ve_cocuk_toplama(tmp_path: Any) -> None:
     """
     # 1. Doğrudan çocuk zombi (waitpid ile toplanır)
     child = subprocess.Popen([sys.executable, "-c", "pass"])
-    deadline = time.time() + 3.0
-    while time.time() < deadline:
-        try:
-            stat_txt = open(f"/proc/{child.pid}/stat", encoding="utf-8").read()
-            rp = stat_txt.rfind(")")
-            if rp != -1 and stat_txt[rp + 1 :].lstrip().startswith("Z"):
-                break
-        except OSError:
-            break
-        time.sleep(0.02)
+    # Çocuğun çıkmasını, onu toplamadan bekle (WNOWAIT): zombi olarak kalır. Taşınabilir, /proc gerekmez.
+    os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
     assert is_pid_alive(child.pid) is False
 
-    # 2. Çocuk olmayan zombi (/proc/<pid>/stat durum 'Z' kontrolü)
+    # 2. Çocuk olmayan zombi: yalnız /proc/<pid>/stat ile görülebilir (Linux).
+    if not os.path.exists("/proc/self/stat"):
+        return
     pid_file = tmp_path / "grandchild.pid"
     parent_proc = subprocess.Popen(
         [
