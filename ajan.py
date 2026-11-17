@@ -15,6 +15,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from typing import Any
@@ -25,9 +26,27 @@ MODEL_ALIASES: dict[str, str] = {
     "flash-orta": "gemini-3.8-flash-medium",
     "argon": "gemini-4-argon-high",
     "argon-orta": "gemini-4-argon-medium",
+    "hydrogen": "gemini-4-hydrogen-xhigh",
+    "hydrogen-high": "gemini-4-hydrogen-high",
+    "hydrogen-orta": "gemini-4-hydrogen-medium",
 }
 
-DEFAULT_MODEL = "gemini-3.8-flash-high"
+DEFAULT_MODEL = "gemini-4-hydrogen-xhigh"
+
+ETIKET_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+RAPOR_KEYS = frozenset(
+    {
+        "ozet",
+        "summary",
+        "degisen_dosyalar",
+        "changed_files",
+        "basarili",
+        "success",
+        "acik_konular",
+        "open_issues",
+    }
+)
 
 
 def get_lang() -> str:
@@ -40,6 +59,9 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "err_task_file_not_found": "Hata: Görev dosyası bulunamadı: {fpath}",
         "err_task_input_required": "Hata: Görev için -g/--gorev-dosyalari veya -m/--mesaj gereklidir.",
         "err_task_running": "Hata: '{etiket}' etiketli görev şu anda canlı çalışıyor (PID: {pid}).",
+        "err_task_not_running": "Hata: '{etiket}' etiketli görev çalışmıyor (durum: {durum}).",
+        "err_invalid_etiket": "Hata: Geçersiz görev etiketi: '{etiket}'. Yalnız [A-Za-z0-9._-] karakterleri (1-64) kullanın; '.' veya '..' olamaz.",
+        "err_invalid_etiket_path": "Hata: Geçersiz görev dizini ('{etiket}'): durum dizini dışında olamaz.",
         "err_task_not_found": "Hata: Görev bulunamadı: {etiket}",
         "err_meta_read": "Hata: Görev meta dosyası okunamadı: {etiket}",
         "err_task_not_finished": "Hata: Görev '{etiket}' henüz bitmemiş. Devam ettirilemez.",
@@ -66,6 +88,7 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "watching_events": "[{etiket}] Olay akışı izleniyor (Çıkmak için Ctrl+C)...",
         "watching_stopped": "\nİzleme durduruldu.",
         "event_file_not_found": "Olay dosyası bulunamadı.",
+        "err_watch_lost": "[{etiket}] süreç kayıp (görev süreci sonlandı veya yanıt vermiyor).",
         "report_title": "=== Görev Raporu: {etiket} ===",
         "report_success": "Başarılı: {val}",
         "report_summary": "\nÖzet:\n  {ozet}",
@@ -97,6 +120,9 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "err_task_file_not_found": "Error: Task file not found: {fpath}",
         "err_task_input_required": "Error: Either -g/--gorev-dosyalari or -m/--mesaj is required for task.",
         "err_task_running": "Error: Task '{etiket}' is currently running (PID: {pid}).",
+        "err_task_not_running": "Error: Task '{etiket}' is not running (status: {durum}).",
+        "err_invalid_etiket": "Error: Invalid task tag: '{etiket}'. Only [A-Za-z0-9._-] characters (1-64) allowed; cannot be '.' or '..'.",
+        "err_invalid_etiket_path": "Error: Invalid task directory ('{etiket}'): must stay inside state root.",
         "err_task_not_found": "Error: Task not found: {etiket}",
         "err_meta_read": "Error: Could not read task meta file: {etiket}",
         "err_task_not_finished": "Error: Task '{etiket}' is not finished yet. Cannot continue.",
@@ -123,6 +149,7 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "watching_events": "[{etiket}] Watching event stream (Ctrl+C to exit)...",
         "watching_stopped": "\nWatching stopped.",
         "event_file_not_found": "Event file not found.",
+        "err_watch_lost": "[{etiket}] process lost (task process terminated or not responding).",
         "report_title": "=== Task Report: {etiket} ===",
         "report_success": "Successful: {val}",
         "report_summary": "\nSummary:\n  {ozet}",
@@ -362,14 +389,35 @@ def is_pid_alive(pid: int | None) -> bool:
     if not pid or pid <= 0:
         return False
     try:
+        wpid, _ = os.waitpid(pid, os.WNOHANG)
+        if wpid == pid:
+            return False
+    except ChildProcessError:
+        pass
+    except OSError:
+        pass
+
+    try:
         os.kill(pid, 0)
-        return True
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
     except OSError:
         return False
+
+    stat_path = f"/proc/{pid}/stat"
+    try:
+        with open(stat_path, "r", encoding="utf-8", errors="replace") as f:
+            stat_data = f.read()
+        rparen = stat_data.rfind(")")
+        if rparen != -1:
+            after = stat_data[rparen + 1 :].lstrip()
+            if after and after[0] in ("Z", "X"):
+                return False
+    except OSError:
+        pass
+    return True
 
 
 def gorev_canli(meta: dict[str, Any] | None) -> bool:
@@ -383,16 +431,110 @@ def gorev_canli(meta: dict[str, Any] | None) -> bool:
     return is_pid_alive(meta.get("bekci_pid")) or is_pid_alive(meta.get("pid"))
 
 
+def validate_etiket(etiket: str, state_root: str | None = None) -> str:
+    """Görev etiketini doğrular ve state_root içindeki güvenli task_dir yolunu döner."""
+    if (
+        not isinstance(etiket, str)
+        or not etiket
+        or etiket in (".", "..")
+        or not ETIKET_RE.fullmatch(etiket)
+    ):
+        raise ValueError(tr("err_invalid_etiket", etiket=etiket))
+    root = state_root if state_root is not None else get_state_root()
+    real_root = os.path.realpath(root)
+    task_dir = os.path.join(root, etiket)
+    real_task = os.path.realpath(task_dir)
+    try:
+        common = os.path.commonpath([real_root, real_task])
+    except ValueError as e:
+        raise ValueError(tr("err_invalid_etiket_path", etiket=etiket)) from e
+    if common != real_root or real_task == real_root:
+        raise ValueError(tr("err_invalid_etiket_path", etiket=etiket))
+    return task_dir
+
+
+def require_task_dir(etiket: str, state_root: str | None = None) -> str:
+    """Etiketi doğrular; geçersizse hatayı stderr'e yazıp çıkış 1 verir."""
+    try:
+        return validate_etiket(etiket, state_root)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
+
+def _record_bekci_pid(
+    task_dir: str, fallback_meta: dict[str, Any], bekci_pid: int
+) -> None:
+    """Bekçi başlatıldıktan sonra meta.json'u yeniden okuyup yalnız bekci_pid'i günceller."""
+    latest_meta = load_meta(task_dir) or dict(fallback_meta)
+    if latest_meta.get("bekci_pid") != bekci_pid:
+        latest_meta["bekci_pid"] = bekci_pid
+        save_meta(task_dir, latest_meta)
+
+
+def _append_dogrulama_record(
+    task_dir: str,
+    meta: dict[str, Any],
+    deneme: int,
+    komut: str,
+    cikis: int,
+    ozet: str,
+) -> None:
+    """Doğrulama sonucunu meta['dogrulama'] listesine ekleyip kaydeder."""
+    record = {
+        "tur": deneme,
+        "komut": komut,
+        "cikis": cikis,
+        "ozet": ozet,
+        "zaman": datetime.now().isoformat(),
+    }
+    dogrulama_list = meta.get("dogrulama")
+    if not isinstance(dogrulama_list, list):
+        dogrulama_list = []
+    dogrulama_list.append(record)
+    meta["dogrulama"] = dogrulama_list
+    save_meta(task_dir, meta)
+
+
+def _is_izle_active(task_dir: str, etiket: str) -> bool:
+    """İzlenen görevin hâlâ çalışıp çalışmadığını denetler; kayıpsa çıkış 1 verir."""
+    meta = load_meta(task_dir)
+    if meta is None:
+        print(tr("err_watch_lost", etiket=etiket), file=sys.stderr)
+        sys.exit(1)
+    if meta.get("durum") != "calisiyor":
+        return False
+    if not gorev_canli(meta):
+        meta_recheck = load_meta(task_dir)
+        if meta_recheck and meta_recheck.get("durum") != "calisiyor":
+            return False
+        if meta_recheck and gorev_canli(meta_recheck):
+            return True
+        print(tr("err_watch_lost", etiket=etiket), file=sys.stderr)
+        sys.exit(1)
+    return True
+
+
 def save_meta(task_dir: str, meta: dict[str, Any]) -> None:
-    """meta.json dosyasını atomik olarak yazar."""
+    """meta.json dosyasını benzersiz geçici dosya üzerinden atomik olarak yazar."""
     os.makedirs(task_dir, exist_ok=True)
     meta_path = os.path.join(task_dir, "meta.json")
-    tmp_path = os.path.join(task_dir, "meta.json.tmp")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2, ensure_ascii=False)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, meta_path)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=f"meta.json.{os.getpid()}.", suffix=".tmp", dir=task_dir
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, meta_path)
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def load_meta(task_dir: str) -> dict[str, Any] | None:
@@ -467,7 +609,9 @@ def extract_rapor(
         for m in reversed(matches):
             try:
                 candidate = json.loads(m.group(1))
-                if isinstance(candidate, dict):
+                if isinstance(candidate, dict) and any(
+                    k in RAPOR_KEYS for k in candidate
+                ):
                     parsed = candidate
                     break
             except Exception:
@@ -481,7 +625,9 @@ def extract_rapor(
         if raw_match:
             try:
                 candidate = json.loads(raw_match.group(1))
-                if isinstance(candidate, dict):
+                if isinstance(candidate, dict) and any(
+                    k in RAPOR_KEYS for k in candidate
+                ):
                     parsed = candidate
             except Exception:
                 pass
@@ -605,7 +751,7 @@ def run_bekci(etiket: str) -> None:
     agy sürecini yönetir, stream-json çıktısını okur ve meta.json'u günceller.
     """
     state_root = get_state_root()
-    task_dir = os.path.join(state_root, etiket)
+    task_dir = require_task_dir(etiket, state_root)
     meta = load_meta(task_dir)
     if not meta:
         sys.exit(1)
@@ -636,7 +782,7 @@ def run_bekci(etiket: str) -> None:
 
     cmd = [agy_bin, "-p", pointer_prompt, "--output-format", "stream-json"]
 
-    model_id = resolve_model(meta.get("model", "flash"))
+    model_id = resolve_model(meta.get("model"))
     cmd.extend(["--model", model_id])
 
     if meta.get("effort"):
@@ -820,15 +966,17 @@ def run_bekci(etiket: str) -> None:
             meta["durum"] = "bitti"
         else:
             meta["durum"] = "hata"
+            last_err = get_last_error_from_log(hata_path)
             if result_status and result_status != "SUCCESS":
                 meta["hata"] = str(result_status)
+            elif last_err:
+                meta["hata"] = last_err
+            elif agy_proc.returncode not in (0, None):
+                meta["hata"] = f"agy çıkış kodu: {agy_proc.returncode}"
             elif not final_response.strip():
                 meta["hata"] = "Boş yanıt döndü"
             else:
-                last_err = get_last_error_from_log(hata_path)
-                meta["hata"] = (
-                    last_err or f"agy çıkış kodu: {agy_proc.returncode}"
-                )
+                meta["hata"] = "Bilinmeyen hata"
 
     elapsed = round(time.time() - start_time, 2)
     tur = meta.get("tur", 1)
@@ -866,7 +1014,7 @@ def run_bekci(etiket: str) -> None:
 def cmd_baslat(args: argparse.Namespace) -> None:
     etiket = args.etiket
     state_root = get_state_root()
-    task_dir = os.path.join(state_root, etiket)
+    task_dir = require_task_dir(etiket, state_root)
     settings_path = get_settings_path()
 
     yaz_list = [
@@ -1007,9 +1155,8 @@ def cmd_baslat(args: argparse.Namespace) -> None:
         stderr=subprocess.DEVNULL,
         close_fds=True,
     )
-    # bekçi kendi meta yazımından önce okunursa da canlı görünsün (yarış)
-    initial_meta["bekci_pid"] = bekci.pid
-    save_meta(task_dir, initial_meta)
+    # bekçi kendi meta yazımından önce okunursa da canlı görünsün; bekçinin yazdığı pid/baslangic_zamani korunur
+    _record_bekci_pid(task_dir, initial_meta, bekci.pid)
 
     if args.bekle:
         code = wait_for_tasks([etiket], zaman_asimi=None)
@@ -1026,7 +1173,11 @@ def calistir_devam(
     zaman_asimi: float | None = None,
 ) -> int:
     state_root = get_state_root()
-    task_dir = os.path.join(state_root, etiket)
+    try:
+        task_dir = validate_etiket(etiket, state_root)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
     if not os.path.exists(task_dir):
         print(tr("err_task_not_found", etiket=etiket), file=sys.stderr)
         return 1
@@ -1076,6 +1227,8 @@ def calistir_devam(
     meta["sure_s"] = 0.0
     meta["takip_mesaji"] = mesaj
     meta["hata"] = None
+    meta["pid"] = None  # önceki turun agy pid'i ölü; yenisini bekçi yazar
+    meta["bekci_pid"] = None
     save_meta(task_dir, meta)
 
     gemini_path = os.path.join(task_dir, "GEMINI.md")
@@ -1092,9 +1245,7 @@ def calistir_devam(
         stderr=subprocess.DEVNULL,
         close_fds=True,
     )
-    meta["bekci_pid"] = bekci.pid
-    meta["pid"] = None  # önceki turun agy pid'i ölü; yenisini bekçi yazar
-    save_meta(task_dir, meta)
+    _record_bekci_pid(task_dir, meta, bekci.pid)
 
     if bekle:
         return wait_for_tasks([etiket], zaman_asimi=zaman_asimi)
@@ -1112,7 +1263,7 @@ def cmd_dogrula(args: argparse.Namespace) -> None:
     etiket = args.etiket
     komut = args.test
     state_root = get_state_root()
-    task_dir = os.path.join(state_root, etiket)
+    task_dir = require_task_dir(etiket, state_root)
     if not os.path.exists(task_dir):
         print(tr("err_task_not_found", etiket=etiket), file=sys.stderr)
         sys.exit(1)
@@ -1149,47 +1300,23 @@ def cmd_dogrula(args: argparse.Namespace) -> None:
             )
             sys.exit(1)
 
-    max_tur = max(1, args.tur)
-    tur = 1
-    while tur <= max_tur:
+    max_duzeltme = max(0, args.tur)
+    duzeltme_sayisi = 0
+    deneme = 1
+    while True:
         cikis, cikti = run_dogrulama_komut(
             komut, cwd=cwd, zaman_asimi=args.zaman_asimi
         )
         if cikis == 0:
-            record = {
-                "tur": tur,
-                "komut": komut,
-                "cikis": 0,
-                "ozet": "",
-                "zaman": datetime.now().isoformat(),
-            }
-            dogrulama_list = meta.get("dogrulama")
-            if not isinstance(dogrulama_list, list):
-                dogrulama_list = []
-            dogrulama_list.append(record)
-            meta["dogrulama"] = dogrulama_list
-            save_meta(task_dir, meta)
-
+            _append_dogrulama_record(task_dir, meta, deneme, komut, 0, "")
             print("DOGRULANDI")
             sys.exit(0)
 
         # Başarısızlık kaydı
         ozet = extract_dogrulama_ozet(cikti)
-        record = {
-            "tur": tur,
-            "komut": komut,
-            "cikis": cikis,
-            "ozet": ozet,
-            "zaman": datetime.now().isoformat(),
-        }
-        dogrulama_list = meta.get("dogrulama")
-        if not isinstance(dogrulama_list, list):
-            dogrulama_list = []
-        dogrulama_list.append(record)
-        meta["dogrulama"] = dogrulama_list
-        save_meta(task_dir, meta)
+        _append_dogrulama_record(task_dir, meta, deneme, komut, cikis, ozet)
 
-        if tur >= max_tur:
+        if duzeltme_sayisi >= max_duzeltme:
             break
 
         lines = cikti.splitlines()
@@ -1209,7 +1336,11 @@ def cmd_dogrula(args: argparse.Namespace) -> None:
                 "Kök nedeni bul ve düzelt. Testleri gevşetme."
             )
 
+        duzeltme_sayisi += 1
         code = calistir_devam(etiket, mesaj, bekle=True)
+        if code != 0:
+            break
+
         meta_after = load_meta(task_dir)
         if meta_after:
             meta = meta_after
@@ -1220,16 +1351,17 @@ def cmd_dogrula(args: argparse.Namespace) -> None:
         if durum not in ("bitti", "hata"):
             break
 
-        tur += 1
+        deneme += 1
 
-    print(f"DOGRULANAMADI ({tur} tur)")
+    print(f"DOGRULANAMADI ({duzeltme_sayisi} tur)")
     sys.exit(1)
 
 
 def cmd_durum(args: argparse.Namespace) -> None:
     state_root = get_state_root()
     etiketler: list[str] = []
-    if args.etiket:
+    if args.etiket is not None:
+        require_task_dir(args.etiket, state_root)
         etiketler = [args.etiket]
     else:
         if os.path.exists(state_root):
@@ -1260,7 +1392,7 @@ def cmd_durum(args: argparse.Namespace) -> None:
         )
         yazilan_sayisi = len(meta.get("yazilan_dosyalar", []))
         son_adim = meta.get("son_adim") or "-"
-        model = meta.get("model") or "flash"
+        model = meta.get("model") or "hydrogen"
         tur = meta.get("tur", 1)
 
         dogrulama_sonucu = "-"
@@ -1350,7 +1482,14 @@ def wait_for_tasks(
     Her biri için tek satır özet yazar. Hepsi 'bitti' ise 0, aksi 1 döner.
     """
     state_root = get_state_root()
-    if not target_etikets:
+    if target_etikets:
+        for etiket in target_etikets:
+            try:
+                validate_etiket(etiket, state_root)
+            except ValueError as e:
+                print(str(e), file=sys.stderr)
+                return 1
+    else:
         target_etikets = []
         if os.path.exists(state_root):
             for entry in sorted(os.listdir(state_root)):
@@ -1377,11 +1516,19 @@ def wait_for_tasks(
                 continue
 
             durum = meta.get("durum")
-            pid = meta.get("pid")
             if durum == "calisiyor":
                 if not gorev_canli(meta):
-                    durum = "kayip"
-                    finished[etiket] = durum
+                    meta_recheck = load_meta(task_dir)
+                    if meta_recheck:
+                        recheck_durum = meta_recheck.get("durum")
+                        if recheck_durum != "calisiyor":
+                            finished[etiket] = str(recheck_durum)
+                        elif gorev_canli(meta_recheck):
+                            all_done = False
+                        else:
+                            finished[etiket] = "kayip"
+                    else:
+                        finished[etiket] = "kayip"
                 else:
                     all_done = False
             else:
@@ -1444,6 +1591,10 @@ def wait_for_tasks(
 
 
 def cmd_bekle(args: argparse.Namespace) -> None:
+    if args.etiketler:
+        state_root = get_state_root()
+        for etiket in args.etiketler:
+            require_task_dir(etiket, state_root)
     code = wait_for_tasks(
         args.etiketler if args.etiketler else None,
         zaman_asimi=args.zaman_asimi,
@@ -1454,7 +1605,7 @@ def cmd_bekle(args: argparse.Namespace) -> None:
 def cmd_rapor(args: argparse.Namespace) -> None:
     etiket = args.etiket
     state_root = get_state_root()
-    task_dir = os.path.join(state_root, etiket)
+    task_dir = require_task_dir(etiket, state_root)
     if not os.path.exists(task_dir):
         print(tr("err_task_not_found", etiket=etiket), file=sys.stderr)
         sys.exit(1)
@@ -1520,7 +1671,7 @@ def cmd_rapor(args: argparse.Namespace) -> None:
 def cmd_izle(args: argparse.Namespace) -> None:
     etiket = args.etiket
     state_root = get_state_root()
-    task_dir = os.path.join(state_root, etiket)
+    task_dir = require_task_dir(etiket, state_root)
     if not os.path.exists(task_dir):
         print(tr("err_task_not_found", etiket=etiket), file=sys.stderr)
         sys.exit(1)
@@ -1530,6 +1681,8 @@ def cmd_izle(args: argparse.Namespace) -> None:
 
     waited = 0
     while not os.path.exists(olaylar_path) and waited < 50:
+        if not _is_izle_active(task_dir, etiket):
+            break
         time.sleep(0.1)
         waited += 1
 
@@ -1584,8 +1737,7 @@ def cmd_izle(args: argparse.Namespace) -> None:
                     except Exception:
                         pass
                 else:
-                    meta = load_meta(task_dir)
-                    if meta and meta.get("durum") != "calisiyor":
+                    if not _is_izle_active(task_dir, etiket):
                         break
                     time.sleep(0.2)
         except KeyboardInterrupt:
@@ -1595,7 +1747,7 @@ def cmd_izle(args: argparse.Namespace) -> None:
 def cmd_iptal(args: argparse.Namespace) -> None:
     etiket = args.etiket
     state_root = get_state_root()
-    task_dir = os.path.join(state_root, etiket)
+    task_dir = require_task_dir(etiket, state_root)
     if not os.path.exists(task_dir):
         print(tr("err_task_not_found", etiket=etiket), file=sys.stderr)
         sys.exit(1)
@@ -1605,8 +1757,23 @@ def cmd_iptal(args: argparse.Namespace) -> None:
         print(tr("err_meta_read", etiket=etiket), file=sys.stderr)
         sys.exit(1)
 
+    if meta.get("durum") != "calisiyor" or not gorev_canli(meta):
+        print(
+            tr(
+                "err_task_not_running",
+                etiket=etiket,
+                durum=meta.get("durum", "bilinmiyor"),
+            ),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     pid = meta.get("pid")
     bekci_pid = meta.get("bekci_pid")
+
+    # Önce meta'ya durum="iptal" yaz (bekçi yarışını önler)
+    meta["durum"] = "iptal"
+    save_meta(task_dir, meta)
 
     # SIGTERM gönder (önce agy süreç grubu, sonra bekçi)
     if pid and is_pid_alive(pid):
@@ -1628,7 +1795,9 @@ def cmd_iptal(args: argparse.Namespace) -> None:
     # 5 saniye boyunca sonlanmayı bekle
     start_t = time.time()
     while time.time() - start_t < 5.0:
-        if not (pid and is_pid_alive(pid)):
+        pid_alive = bool(pid and is_pid_alive(pid))
+        bekci_alive = bool(bekci_pid and is_pid_alive(bekci_pid))
+        if not pid_alive and not bekci_alive:
             break
         time.sleep(0.2)
     else:
@@ -1648,8 +1817,11 @@ def cmd_iptal(args: argparse.Namespace) -> None:
             except Exception:
                 pass
 
-    meta["durum"] = "iptal"
-    save_meta(task_dir, meta)
+    # Bekçi, ölmeden önce kendi sözlüğüyle "calisiyor" yazmış olabilir; iptali kalıcı yap.
+    final_meta = load_meta(task_dir) or meta
+    if final_meta.get("durum") != "iptal":
+        final_meta["durum"] = "iptal"
+        save_meta(task_dir, final_meta)
     print(tr("task_cancelled", etiket=etiket))
 
 
@@ -1668,11 +1840,9 @@ def cmd_temizle(args: argparse.Namespace) -> None:
         if not os.path.isdir(tdir):
             continue
         meta = load_meta(tdir)
-        if (
-            meta
-            and meta.get("durum") == "calisiyor"
-            and gorev_canli(meta)
-        ):
+        if meta is None:
+            continue
+        if meta.get("durum") == "calisiyor" and gorev_canli(meta):
             continue
 
         try:
@@ -1734,13 +1904,17 @@ def main() -> None:
     p_baslat.add_argument("etiket", help="Görev etiketi")
     g_input = p_baslat.add_mutually_exclusive_group(required=True)
     g_input.add_argument(
-        "-g", "--gorev-dosyalari", nargs="+", help="Görev metnini içeren dosyalar"
+        "-g",
+        "--gorev-dosyalari",
+        action="extend",
+        nargs="+",
+        help="Görev metnini içeren dosyalar",
     )
     g_input.add_argument("-m", "--mesaj", help="Görev metni")
     p_baslat.add_argument(
         "--model",
-        default="flash",
-        help="Model (flash, argon, flash-orta, argon-orta veya tam kimlik)",
+        default="hydrogen",
+        help="Model (hydrogen, hydrogen-high, hydrogen-orta, flash, flash-orta, argon, argon-orta veya tam kimlik)",
     )
     p_baslat.add_argument(
         "--effort",
@@ -1867,7 +2041,7 @@ def main() -> None:
         "--tur",
         type=int,
         default=3,
-        help="Maksimum deneme/düzeltme tur sayısı (varsayılan: 3)",
+        help="Maksimum düzeltme turu sayısı; test en fazla N+1 kez çalıştırılır (varsayılan: 3)",
     )
     p_dogrula.add_argument(
         "--cwd", help="Komutun çalıştırılacağı dizin"

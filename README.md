@@ -18,7 +18,7 @@ You ─▶ Claude Code            plans, writes the task file, verifies with you
 ## Features
 
 - **Background tasks.** `baslat` returns immediately and `bekle` blocks until the task finishes, so Claude can do other work in the meantime.
-- **Verification by your own tests.** `dogrula --test "<cmd>"` runs your command and sends failures back to Gemini, up to `--tur` rounds.
+- **Verification by your own tests.** `dogrula --test "<cmd>"` runs your command and sends failures back to Gemini for up to `--tur` fix rounds (default 3; tests run at most `N + 1` times).
 - **Continue in context.** `devam` resumes the same Gemini conversation (`--conversation <id>`), so fixes keep the earlier context.
 - **Narrow write access.** Gemini may only write to the `--yaz` directories. Missing rules stop the run with exit code 2 before any tokens are spent.
 - **Sandboxed by default.** With no `--komut` prefixes the terminal is disabled (`--sandbox`).
@@ -37,12 +37,13 @@ You ─▶ Claude Code            plans, writes the task file, verifies with you
 ```bash
 claude plugin marketplace add HSGunes/gemini-baton-for-claude-code
 claude plugin install baton@gemini-baton
+mkdir -p ~/.local/bin
 ln -sfn "$(ls -d ~/.claude/plugins/cache/gemini-baton/baton/* | sort -V | tail -1)/bin/baton" ~/.local/bin/baton
 export AJAN_DIL=en        # English messages (default: Turkish)
 baton --help
 ```
 
-The `ln` step is needed because Claude Code does not put a plugin's `bin/` on `PATH`. Restart Claude Code, then ask:
+The `ln` step is needed because Claude Code does not put a plugin's `bin/` on `PATH`. If `~/.local/bin` is not on your `PATH`, add it. Restart Claude Code, then ask:
 
 ```text
 /baton:devret Add input validation to src/parser.py so empty strings raise ValueError; verify with: python3 -m pytest tests/test_parser.py
@@ -64,7 +65,7 @@ Claude hands the task to the `baton:ajan-yonetici` subagent. The subagent writes
 
 ```bash
 # 1. Start a task in the background (Gemini may write only to ./src)
-baton baslat parser-fix -m "Make parse() raise ValueError on empty input" --yaz ./src --model flash
+baton baslat parser-fix -m "Make parse() raise ValueError on empty input" --yaz ./src
 
 # 2. Wait until it finishes
 baton bekle parser-fix
@@ -82,11 +83,11 @@ baton dogrula parser-fix --test "python3 -m pytest tests/test_parser.py" --tur 2
 `baton durum` lists all tasks (example output with `AJAN_DIL=en`):
 
 ```text
-TAG         MODEL  STATUS  VERIFY  ROUND  DURATION  LAST STEP       FILES  TOKENS
-parser-fix  flash  bitti   -       1      84.2s     agent_response  1      243461
+TAG         MODEL     STATUS  VERIFY  ROUND  DURATION  LAST STEP       FILES  TOKENS
+parser-fix  hydrogen  bitti   -       1      84.2s     agent_response  1      243461
 ```
 
-For longer tasks, put the context in a Markdown file and pass it with `-g` (see [examples/GOREV_ORNEK.md](examples/GOREV_ORNEK.md)).
+For longer tasks, put the context in Markdown files and pass them with `-g` (`-g A -g B` and `-g A B` both accept multiple files; see [examples/GOREV_ORNEK.md](examples/GOREV_ORNEK.md)).
 
 ## Command reference
 
@@ -99,13 +100,15 @@ Subcommands are Turkish. The English meaning is in the second column.
 | `durum [<tag>]` | status | `--json` |
 | `rapor <tag>` | report | `--ham` (raw response) |
 | `devam <tag>` | continue | `-m TEXT` (required), `--bekle` |
-| `dogrula <tag>` | verify loop | `--test CMD`, `--tur N` (default 3), `--cwd DIR`, `--zaman-asimi SECONDS` |
+| `dogrula <tag>` | verify loop | `--test CMD`, `--tur N` (at most N fix rounds, default 3), `--cwd DIR`, `--zaman-asimi SECONDS` |
 | `izle <tag>` | follow the live event stream | |
-| `iptal <tag>` | cancel (SIGTERM, then SIGKILL after 5 s) | |
+| `iptal <tag>` | cancel running task (SIGTERM, then SIGKILL after 5 s; exit 1 if not running) | |
 | `temizle` | delete old tasks | `--gun DAYS` (default 7) |
 | `izin kontrol` | check permissions only | `--yaz`, `--komut`, `--izin-ekle` |
 
-Model aliases: `flash` → `gemini-3.8-flash-high` (default), `flash-orta` → `gemini-3.8-flash-medium`, `argon` → `gemini-4-argon-high`, `argon-orta` → `gemini-4-argon-medium`. You can also pass any full model ID.
+Task tags (`<tag>`) may only contain `[A-Za-z0-9._-]` and must be 1–64 characters long.
+
+Model aliases: `hydrogen` → `gemini-4-hydrogen-xhigh` (default), `hydrogen-high`, `hydrogen-orta`, `flash` → `gemini-3.8-flash-high`, `flash-orta` → `gemini-3.8-flash-medium`, `argon` → `gemini-4-argon-high`, `argon-orta` → `gemini-4-argon-medium`. You can also pass any full model ID.
 
 ## Configuration
 
@@ -136,7 +139,7 @@ Model aliases: `flash` → `gemini-3.8-flash-high` (default), `flash-orta` → `
 ## Limitations
 
 - Requires a local, signed-in `agy`. Tasks run on the same machine; there is no remote worker support.
-- Subcommands, the skill and the subagent prompts are written in Turkish. English output is available through `AJAN_DIL=en`.
+- Subcommands, the skill and the subagent prompts are written in Turkish. Setting `AJAN_DIL=en` translates status messages and task prompts, though `--help` and some outputs remain in Turkish.
 - The token count shown by `durum` covers input and output; cache reads are not shown.
 - Not affiliated with Anthropic or Google.
 

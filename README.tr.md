@@ -18,7 +18,7 @@ Sen ─▶ Claude Code            planlar, görev dosyasını yazar, senin testl
 ## Özellikler
 
 - **Arka plan görevleri.** `baslat` hemen döner, `bekle` görev bitene kadar bekler. Bu sırada Claude başka işlere bakabilir.
-- **Senin testlerinle doğrulama.** `dogrula --test "<komut>"` testi çalıştırır ve hatayı `--tur` kez Gemini'ye geri gönderir.
+- **Senin testlerinle doğrulama.** `dogrula --test "<komut>"` testi çalıştırır ve hatayı en fazla `--tur` düzeltme turu boyunca Gemini'ye geri gönderir (varsayılan 3; test en fazla `N + 1` kez çalışır).
 - **Bağlamı koruyarak devam.** `devam` aynı Gemini konuşmasını sürdürür (`--conversation <id>`).
 - **Dar yazma izni.** Gemini yalnız `--yaz` ile verilen dizinlere yazabilir. Eksik izin kuralı olursa görev, token harcanmadan çıkış 2 ile durur.
 - **Varsayılan sandbox.** `--komut` verilmezse terminal kapalıdır (`--sandbox`).
@@ -37,11 +37,12 @@ Sen ─▶ Claude Code            planlar, görev dosyasını yazar, senin testl
 ```bash
 claude plugin marketplace add HSGunes/gemini-baton-for-claude-code
 claude plugin install baton@gemini-baton
+mkdir -p ~/.local/bin
 ln -sfn "$(ls -d ~/.claude/plugins/cache/gemini-baton/baton/* | sort -V | tail -1)/bin/baton" ~/.local/bin/baton
 baton --help
 ```
 
-`ln` adımı gerekli, çünkü Claude Code eklentinin `bin/` dizinini `PATH`'e eklemez. Claude Code'u yeniden başlattıktan sonra şunu yaz:
+`ln` adımı gerekli, çünkü Claude Code eklentinin `bin/` dizinini `PATH`'e eklemez. `~/.local/bin` `PATH`'te değilse ekleyin. Claude Code'u yeniden başlattıktan sonra şunu yaz:
 
 ```text
 /baton:devret src/parser.py'ye girdi doğrulaması ekle; boş metin ValueError fırlatsın. Doğrulama: python3 -m pytest tests/test_parser.py
@@ -63,7 +64,7 @@ Claude işi `baton:ajan-yonetici` alt ajanına verir. Alt ajan görev dosyasın�
 
 ```bash
 # 1. Görevi arka planda başlat (Gemini yalnız ./src içine yazabilir)
-baton baslat parser-fix -m "parse() boş girdide ValueError fırlatsın" --yaz ./src --model flash
+baton baslat parser-fix -m "parse() boş girdide ValueError fırlatsın" --yaz ./src
 
 # 2. Bitmesini bekle
 baton bekle parser-fix
@@ -78,7 +79,7 @@ baton devam parser-fix -m "tests/test_parser.py::test_empty hâlâ KeyError veri
 baton dogrula parser-fix --test "python3 -m pytest tests/test_parser.py" --tur 2
 ```
 
-Uzun işlerde bağlamı bir Markdown dosyasına yazıp `-g` ile ver (örnek: [examples/GOREV_ORNEK.md](examples/GOREV_ORNEK.md)).
+Uzun işlerde bağlamı Markdown dosyalarına yazıp `-g` ile ver (`-g A -g B` ve `-g A B` ikisi de birden çok dosya kabul eder; örnek: [examples/GOREV_ORNEK.md](examples/GOREV_ORNEK.md)).
 
 ## Komutlar
 
@@ -89,13 +90,15 @@ Uzun işlerde bağlamı bir Markdown dosyasına yazıp `-g` ile ver (örnek: [ex
 | `durum [<etiket>]` | `--json` |
 | `rapor <etiket>` | `--ham` (ham yanıt) |
 | `devam <etiket>` | `-m METİN` (zorunlu), `--bekle` |
-| `dogrula <etiket>` | `--test KOMUT`, `--tur N` (varsayılan 3), `--cwd DİZİN`, `--zaman-asimi SANİYE` |
+| `dogrula <etiket>` | `--test KOMUT`, `--tur N` (en fazla N düzeltme turu, varsayılan 3), `--cwd DİZİN`, `--zaman-asimi SANİYE` |
 | `izle <etiket>` | canlı olay akışı |
-| `iptal <etiket>` | SIGTERM, 5 sn sonra SIGKILL |
+| `iptal <etiket>` | çalışan görevi durdurur: SIGTERM, 5 sn sonra SIGKILL (çalışmıyorsa çıkış 1) |
 | `temizle` | `--gun GÜN` (varsayılan 7) |
 | `izin kontrol` | `--yaz`, `--komut`, `--izin-ekle` |
 
-Model takma adları: `flash` → `gemini-3.8-flash-high` (varsayılan), `flash-orta` → `gemini-3.8-flash-medium`, `argon` → `gemini-4-argon-high`, `argon-orta` → `gemini-4-argon-medium`. İstersen tam model kimliğini de verebilirsin.
+Görev etiketleri (`<etiket>`) yalnız `[A-Za-z0-9._-]` karakterlerinden oluşabilir ve 1–64 karakter uzunluğunda olmalıdır.
+
+Model takma adları: `hydrogen` → `gemini-4-hydrogen-xhigh` (varsayılan), `hydrogen-high`, `hydrogen-orta`, `flash` → `gemini-3.8-flash-high`, `flash-orta` → `gemini-3.8-flash-medium`, `argon` → `gemini-4-argon-high`, `argon-orta` → `gemini-4-argon-medium`. İstersen tam model kimliğini de verebilirsin.
 
 ## Yapılandırma
 
@@ -126,6 +129,7 @@ Model takma adları: `flash` → `gemini-3.8-flash-high` (varsayılan), `flash-o
 ## Sınırlamalar
 
 - Yerelde kurulu ve oturumu açık bir `agy` gerekir. Görevler aynı makinede çalışır; uzak makinede çalıştırma desteği yok.
+- `--help` ve bazı çıktılar `AJAN_DIL=en` olsa da Türkçe kalır.
 - `durum` çıktısındaki token sayısı girdi ve çıktıyı kapsar; cache okumaları görünmez.
 - Anthropic ya da Google ile bağlantılı değildir.
 

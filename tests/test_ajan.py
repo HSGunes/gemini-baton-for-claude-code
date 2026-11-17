@@ -15,7 +15,9 @@ import time
 from typing import Any
 import pytest
 
+import ajan
 from ajan import (
+    DEFAULT_MODEL,
     MODEL_ALIASES,
     add_permissions,
     check_permissions,
@@ -326,11 +328,15 @@ def run_ajan(
 # ---------------------------------------------------------------------------
 def test_model_takma_adlari() -> None:
     """Model takma adlarının doğru çözümlendiğini doğrular."""
+    assert DEFAULT_MODEL == "gemini-4-hydrogen-xhigh"
     assert resolve_model("flash") == "gemini-3.8-flash-high"
     assert resolve_model("flash-orta") == "gemini-3.8-flash-medium"
     assert resolve_model("argon") == "gemini-4-argon-high"
     assert resolve_model("argon-orta") == "gemini-4-argon-medium"
-    assert resolve_model(None) == "gemini-3.8-flash-high"
+    assert resolve_model("hydrogen") == "gemini-4-hydrogen-xhigh"
+    assert resolve_model("hydrogen-high") == "gemini-4-hydrogen-high"
+    assert resolve_model("hydrogen-orta") == "gemini-4-hydrogen-medium"
+    assert resolve_model(None) == "gemini-4-hydrogen-xhigh"
     assert resolve_model("claude-sonnet-5-5-high") == "claude-sonnet-5-5-high"
 
 
@@ -863,7 +869,7 @@ def test_dogrula_bir_turda_duzelen(
 
 
 def test_dogrula_tur_sinirinda_basarisiz(test_env: dict[str, Any]) -> None:
-    """Belirtilen maksimum tur sayısına ulaşılınca başarısız sonlandığını doğrular."""
+    """Belirtilen maksimum düzeltme turu sayısına ulaşılınca (N+1 test çalıştırması) başarısız sonlandığını doğrular."""
     env = test_env["env"]
     res_baslat = run_ajan(
         ["baslat", "dogrula_sinir", "-m", "Sınır testi", "--bekle"], env=env
@@ -885,9 +891,11 @@ def test_dogrula_tur_sinirinda_basarisiz(test_env: dict[str, Any]) -> None:
 
     meta_path = test_env["state_dir"] / "dogrula_sinir" / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    assert len(meta.get("dogrulama", [])) == 2
+    assert len(meta.get("dogrulama", [])) == 3
     assert meta["dogrulama"][0]["cikis"] == 1
     assert meta["dogrulama"][1]["cikis"] == 1
+    assert meta["dogrulama"][2]["cikis"] == 1
+    assert meta["tur"] == 3
     assert "FAILED" in meta["dogrulama"][0]["ozet"]
 
     res_durum = run_ajan(["durum", "dogrula_sinir", "--json"], env=env)
@@ -1115,3 +1123,639 @@ def test_add_permissions_bozuk_json_hata_firlatir(tmp_path: Any) -> None:
     with pytest.raises(ValueError):
         add_permissions(["write_file(/tmp/x)"], str(yol))
     assert yol.read_text(encoding="utf-8") == "{bozuk"
+
+
+# ---------------------------------------------------------------------------
+# Yeni Hata Düzeltme Testleri (Madde 1-12)
+# ---------------------------------------------------------------------------
+def test_gorev_dosyalari_tekrarli_g_ve_coklu_sirali(
+    test_env: dict[str, Any], tmp_path: Any
+) -> None:
+    """-g A -g B ve -g A B iki dosyayı da sırasını koruyarak birleştirmelidir."""
+    env = test_env["env"]
+    f1 = tmp_path / "birinci.md"
+    f2 = tmp_path / "ikinci.md"
+    f3 = tmp_path / "ucuncu.md"
+    f1.write_text("BIRINCI_BOLUM", encoding="utf-8")
+    f2.write_text("IKINCI_BOLUM", encoding="utf-8")
+    f3.write_text("UCUNCU_BOLUM", encoding="utf-8")
+
+    # 1. Tekrarlı -g A -g B
+    res1 = run_ajan(
+        ["baslat", "g_tekrar", "-g", str(f1), "-g", str(f2), "--bekle"],
+        env=env,
+    )
+    assert res1.returncode == 0, res1.stderr
+    gemini1 = (test_env["state_dir"] / "g_tekrar" / "GEMINI.md").read_text(
+        encoding="utf-8"
+    )
+    assert "BIRINCI_BOLUM" in gemini1
+    assert "IKINCI_BOLUM" in gemini1
+    assert gemini1.index("BIRINCI_BOLUM") < gemini1.index("IKINCI_BOLUM")
+
+    # 2. Karma -g A B -g C
+    res2 = run_ajan(
+        [
+            "baslat",
+            "g_coklu",
+            "-g",
+            str(f1),
+            str(f2),
+            "-g",
+            str(f3),
+            "--bekle",
+        ],
+        env=env,
+    )
+    assert res2.returncode == 0, res2.stderr
+    gemini2 = (test_env["state_dir"] / "g_coklu" / "GEMINI.md").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        gemini2.index("BIRINCI_BOLUM")
+        < gemini2.index("IKINCI_BOLUM")
+        < gemini2.index("UCUNCU_BOLUM")
+    )
+
+
+def test_iptal_calismayan_gorevde_sinyal_gondermez_ve_durumu_korur(
+    test_env: dict[str, Any]
+) -> None:
+    """cmd_iptal yalnızca durum=='calisiyor' ve canlıyken sinyal göndermeli; aksi halde çıkış 1 vermeli."""
+    env = test_env["env"]
+    state_dir = test_env["state_dir"]
+
+    # Sahte canlı bir süreç başlat; bitti durumundaki meta'da yanlışlıkla bu PID dursa bile sinyal gitmemeli
+    masum_proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(10)"],
+        start_new_session=True,
+    )
+    try:
+        for idx, (durum, p_val) in enumerate(
+            [
+                ("bitti", masum_proc.pid),
+                ("hata", masum_proc.pid),
+                ("iptal", masum_proc.pid),
+                ("calisiyor", 99999999),
+            ]
+        ):
+            etiket = f"pasif_{idx}_{durum}"
+            tdir = state_dir / etiket
+            tdir.mkdir(parents=True, exist_ok=True)
+            meta = {
+                "etiket": etiket,
+                "durum": durum,
+                "pid": p_val,
+                "bekci_pid": None,
+                "tur": 1,
+            }
+            (tdir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+            res = run_ajan(["iptal", etiket], env=env)
+            assert res.returncode == 1
+            assert "görev çalışmıyor" in res.stderr.lower()
+            after = json.loads((tdir / "meta.json").read_text(encoding="utf-8"))
+            assert after["durum"] == durum
+
+            # İngilizce mesaj kontrolü
+            env_en = dict(env, AJAN_DIL="en")
+            res_en = run_ajan(["iptal", etiket], env=env_en)
+            assert res_en.returncode == 1
+            assert "not running" in res_en.stderr.lower()
+
+        # Masum süreç hala canlı olmalı
+        assert masum_proc.poll() is None
+    finally:
+        masum_proc.terminate()
+        masum_proc.wait(timeout=5)
+
+
+def test_iptal_once_meta_iptal_yazar_sonra_sinyal_gonderir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """cmd_iptal sinyal göndermeden önce meta.json'a durum='iptal' yazmalıdır."""
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("AJAN_DIZIN", str(state_dir))
+    task_dir = state_dir / "canli_iptal"
+    task_dir.mkdir(parents=True, exist_ok=True)
+    ajan.save_meta(
+        str(task_dir),
+        {
+            "etiket": "canli_iptal",
+            "durum": "calisiyor",
+            "pid": 12345,
+            "bekci_pid": 12346,
+        },
+    )
+
+    observed_statuses: list[str | None] = []
+    alive_calls = {"n": 0}
+
+    def fake_alive(pid: int | None) -> bool:
+        # İlk gorev_canli + iki SIGTERM kontrolünde canlı, bekleme döngüsünde ölü
+        alive_calls["n"] += 1
+        return alive_calls["n"] <= 3
+
+    def fake_killpg(pgid: int, sig: int) -> None:
+        m = ajan.load_meta(str(task_dir))
+        observed_statuses.append(m.get("durum") if m else None)
+
+    def fake_kill(pid: int, sig: int) -> None:
+        m = ajan.load_meta(str(task_dir))
+        observed_statuses.append(m.get("durum") if m else None)
+
+    monkeypatch.setattr(ajan, "is_pid_alive", fake_alive)
+    monkeypatch.setattr(os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(os, "killpg", fake_killpg)
+    monkeypatch.setattr(os, "kill", fake_kill)
+
+    args = type("Args", (), {"etiket": "canli_iptal"})()
+    ajan.cmd_iptal(args)
+
+    assert len(observed_statuses) >= 1
+    assert all(st == "iptal" for st in observed_statuses)
+
+
+def test_etiket_dogrulama_tum_komutlar_ve_symlink(test_env: dict[str, Any], tmp_path: Any) -> None:
+    """Geçersiz etiketler ve state_root dışına kaçan yollar tr/en hata ve çıkış 1 ile reddedilmelidir."""
+    env = test_env["env"]
+    state_dir = test_env["state_dir"]
+
+    invalid_labels = [
+        ".",
+        "..",
+        "../kacis",
+        "alt/dizin",
+        "a\\b",
+        "bosluk var",
+        "türkçe",
+        "",
+        "x" * 65,
+    ]
+    commands_per_label: list[list[str]] = [
+        ["baslat", "{lbl}", "-m", "test"],
+        ["devam", "{lbl}", "-m", "takip"],
+        ["dogrula", "{lbl}", "--test", "true"],
+        ["durum", "{lbl}"],
+        ["bekle", "{lbl}"],
+        ["rapor", "{lbl}"],
+        ["izle", "{lbl}"],
+        ["iptal", "{lbl}"],
+    ]
+
+    for lbl in invalid_labels:
+        for cmd_tpl in commands_per_label:
+            cmd = [c.format(lbl=lbl) for c in cmd_tpl]
+            res_tr = run_ajan(cmd, env=env)
+            assert res_tr.returncode == 1, f"TR geçerli saydı: {cmd}"
+            assert res_tr.stderr.strip(), f"TR hata mesajı boş: {cmd}"
+
+            env_en = dict(env, AJAN_DIL="en")
+            res_en = run_ajan(cmd, env=env_en)
+            assert res_en.returncode == 1, f"EN geçerli saydı: {cmd}"
+            assert "Error:" in res_en.stderr, f"EN hata mesajı bekleniyordu: {cmd}"
+
+    # Symlink ile state_root dışına kaçış denemesi
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "kacis_link").symlink_to(outside_dir)
+    res_sym = run_ajan(["baslat", "kacis_link", "-m", "deneme"], env=env)
+    assert res_sym.returncode == 1
+    assert res_sym.stderr.strip()
+
+    # Geçerli sınır etiketleri (64 karakter, nokta/tire/altçizgi) çalışmalı
+    valid_lbl = "A1_b-2." + ("z" * 57)
+    assert len(valid_lbl) == 64
+    res_ok = run_ajan(["baslat", valid_lbl, "-m", "geçerli", "--bekle"], env=env)
+    assert res_ok.returncode == 0, res_ok.stderr
+
+
+def test_meta_yarisi_gecici_dosya_ve_bekci_pid_koruma(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """
+    (a) save_meta benzersiz geçici dosya kullanmalı.
+    (b) cmd_baslat ve calistir_devam bekçi başlatıldıktan sonra meta.json'u yeniden okuyup
+        yalnız bekci_pid'i güncellemeli; calistir_devam pid=None atamasını bekçiden önce yapmalı.
+    """
+    state_dir = tmp_path / "state"
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"permissions": {"allow": []}}), encoding="utf-8")
+    monkeypatch.setenv("AJAN_DIZIN", str(state_dir))
+    monkeypatch.setenv("AJAN_AYAR", str(settings_path))
+
+    # (a) os.replace'e verilen geçici dosya meta.json.tmp değil, benzersiz olmalı
+    tmp_sources: list[str] = []
+    orig_replace = os.replace
+
+    def spy_replace(src: str, dst: str) -> None:
+        tmp_sources.append(os.path.basename(src))
+        orig_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", spy_replace)
+    tdir_tmp = tmp_path / "save_test"
+    ajan.save_meta(str(tdir_tmp), {"a": 1})
+    ajan.save_meta(str(tdir_tmp), {"a": 2})
+    assert len(tmp_sources) == 2
+    assert all(s != "meta.json.tmp" for s in tmp_sources)
+    assert tmp_sources[0] != tmp_sources[1]
+    assert all(str(os.getpid()) in s for s in tmp_sources)
+    monkeypatch.undo()
+    monkeypatch.setenv("AJAN_DIZIN", str(state_dir))
+    monkeypatch.setenv("AJAN_AYAR", str(settings_path))
+
+    # (b1) cmd_baslat testi
+    class FakeProc:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+
+    def fake_popen_baslat(*args: Any, **kwargs: Any) -> FakeProc:
+        # Bekçi başlatılır başlamaz pid ve baslangic_zamani yazmış gibi davran
+        tdir = state_dir / "yaris_baslat"
+        m = ajan.load_meta(str(tdir))
+        assert m is not None
+        m["pid"] = 77777
+        m["baslangic_zamani"] = "2099-05-05T12:00:00"
+        ajan.save_meta(str(tdir), m)
+        return FakeProc(88888)
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen_baslat)
+    baslat_args = type(
+        "Args",
+        (),
+        {
+            "etiket": "yaris_baslat",
+            "gorev_dosyalari": None,
+            "mesaj": "test",
+            "model": "hydrogen",
+            "effort": None,
+            "yaz": [],
+            "oku": [],
+            "komut": [],
+            "sure": None,
+            "sandbox": False,
+            "izin_ekle": False,
+            "bekle": False,
+        },
+    )()
+    with pytest.raises(SystemExit) as exc:
+        ajan.cmd_baslat(baslat_args)
+    assert exc.value.code == 0
+
+    meta_b = ajan.load_meta(str(state_dir / "yaris_baslat"))
+    assert meta_b is not None
+    assert meta_b["pid"] == 77777
+    assert meta_b["baslangic_zamani"] == "2099-05-05T12:00:00"
+    assert meta_b["bekci_pid"] == 88888
+
+    # (b2) calistir_devam testi: Popen çağrılmadan önce pid=None yazılmış olmalı,
+    # Popen sırasında bekçinin yazdığı pid/baslangic_zamani korunmalı.
+    meta_b["durum"] = "bitti"
+    meta_b["conversation_id"] = "conv-123"
+    ajan.save_meta(str(state_dir / "yaris_baslat"), meta_b)
+
+    pid_before_popen: list[Any] = []
+
+    def fake_popen_devam(*args: Any, **kwargs: Any) -> FakeProc:
+        tdir = state_dir / "yaris_baslat"
+        m = ajan.load_meta(str(tdir))
+        assert m is not None
+        pid_before_popen.append(m.get("pid"))
+        m["pid"] = 99999
+        m["baslangic_zamani"] = "2099-06-06T12:00:00"
+        ajan.save_meta(str(tdir), m)
+        return FakeProc(88889)
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen_devam)
+    rc = ajan.calistir_devam("yaris_baslat", "takip", bekle=False)
+    assert rc == 0
+    assert pid_before_popen == [None]
+
+    meta_d = ajan.load_meta(str(state_dir / "yaris_baslat"))
+    assert meta_d is not None
+    assert meta_d["pid"] == 99999
+    assert meta_d["baslangic_zamani"] == "2099-06-06T12:00:00"
+    assert meta_d["bekci_pid"] == 88889
+
+
+def test_run_bekci_hata_oncelik_sirasi(
+    test_env: dict[str, Any], tmp_path: Any
+) -> None:
+    """
+    run_bekci hata dalı öncelik sırası:
+    result_status (!= SUCCESS) -> hata.log son hata -> agy çıkış kodu != 0 -> boş yanıt.
+    """
+    custom_agy = tmp_path / "custom_err_agy.py"
+    custom_agy.write_text(
+        """#!/usr/bin/env python3
+import json, os, sys
+case = os.environ["TEST_CASE"]
+if case == "result_status":
+    sys.stderr.write("ERROR: stderr mesaji\\n")
+    print(json.dumps({"event": "result", "result": {"status": "FAILED_MODEL", "response": ""}}), flush=True)
+    sys.exit(2)
+elif case == "hata_log":
+    sys.stderr.write("INFO: basladi\\n")
+    sys.stderr.write("ERROR: baglanti koptu\\n")
+    sys.exit(2)
+elif case == "exit_code":
+    sys.exit(3)
+elif case == "empty_resp":
+    print(json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": "   "}}), flush=True)
+    sys.exit(0)
+""",
+        encoding="utf-8",
+    )
+    custom_agy.chmod(custom_agy.stat().st_mode | stat.S_IEXEC)
+
+    env = dict(test_env["env"])
+    env["AJAN_AGY"] = str(custom_agy)
+    state_dir = test_env["state_dir"]
+
+    expectations = [
+        ("result_status", "FAILED_MODEL"),
+        ("hata_log", "ERROR: baglanti koptu"),
+        ("exit_code", "agy çıkış kodu: 3"),
+        ("empty_resp", "Boş yanıt döndü"),
+    ]
+    for case, expected_err in expectations:
+        env["TEST_CASE"] = case
+        res = run_ajan(["baslat", f"err_{case}", "-m", "test", "--bekle"], env=env)
+        assert res.returncode == 1
+        meta = json.loads((state_dir / f"err_{case}" / "meta.json").read_text(encoding="utf-8"))
+        assert meta["durum"] == "hata"
+        assert meta["hata"] == expected_err
+
+
+def test_extract_rapor_rapor_anahtarlari_dogrulamasi() -> None:
+    """
+    extract_rapor yalnız rapor anahtarlarından en az birini içeren JSON sözlüğünü rapor saymalı,
+    aksi halde önceki adaya geçmeli veya fallback (basarili: None) üretmelidir.
+    """
+    # 1. Sonda ilgisiz JSON bloğu varsa önceki geçerli rapor bloğunu seçmeli
+    text_with_trailing_other = """
+    ```json
+    {"ozet": "Asıl rapor", "degisen_dosyalar": ["x.py"], "basarili": true}
+    ```
+    Örnek config:
+    ```json
+    {"port": 8080, "debug": true}
+    ```
+    """
+    r1 = extract_rapor(text_with_trailing_other, ["y.py"], [])
+    assert r1["ozet"] == "Asıl rapor"
+    assert r1["degisen_dosyalar"] == ["x.py"]
+    assert r1["basarili"] is True
+
+    # 2. Yalnızca ilgisiz JSON bloğu varsa rapor sayılmamalı -> fallback (basarili: None)
+    text_only_other = """
+    İşlem yapıldı.
+    ```json
+    {"status": "ok", "count": 5}
+    ```
+    """
+    r2 = extract_rapor(text_only_other, ["z.py"], ["pytest"])
+    assert r2["basarili"] is None
+    assert r2["degisen_dosyalar"] == ["z.py"]
+    assert r2["calistirilan_testler"] == ["pytest"]
+
+    # 3. İzin verilen anahtarlardan herhangi biri (ör. acik_konular veya open_issues) varsa rapor sayılmalı
+    r3 = extract_rapor('```json\n{"open_issues": ["kalan iş"]}\n```', [], [])
+    assert r3["acik_konular"] == ["kalan iş"]
+    assert r3["basarili"] is True
+
+
+def test_temizle_yalniz_okunabilen_meta_icerenleri_siler(
+    test_env: dict[str, Any]
+) -> None:
+    """cmd_temizle yalnızca load_meta ile okunabilen meta.json içeren eski dizinleri silmelidir."""
+    env = test_env["env"]
+    state_dir = test_env["state_dir"]
+    old_ts = time.time() - (10 * 86400)
+
+    # 1. Geçerli eski görev -> silinmeli
+    valid_dir = state_dir / "eski_gorev"
+    valid_dir.mkdir(parents=True, exist_ok=True)
+    (valid_dir / "meta.json").write_text(
+        json.dumps({"etiket": "eski_gorev", "durum": "bitti"}), encoding="utf-8"
+    )
+    os.utime(valid_dir, (old_ts, old_ts))
+
+    # 2. meta.json olmayan yabancı dizin -> dokunulmamalı
+    unrelated_dir = state_dir / "yabanci_dizin"
+    unrelated_dir.mkdir(parents=True, exist_ok=True)
+    (unrelated_dir / "not.txt").write_text("önemli", encoding="utf-8")
+    os.utime(unrelated_dir, (old_ts, old_ts))
+
+    # 3. Bozuk meta.json içeren dizin -> dokunulmamalı
+    corrupt_dir = state_dir / "bozuk_meta_dizin"
+    corrupt_dir.mkdir(parents=True, exist_ok=True)
+    (corrupt_dir / "meta.json").write_text("{bozuk json", encoding="utf-8")
+    os.utime(corrupt_dir, (old_ts, old_ts))
+
+    # 4. Canlı çalışan görev -> dokunulmamalı
+    live_proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(10)"],
+        start_new_session=True,
+    )
+    try:
+        live_dir = state_dir / "canli_eski"
+        live_dir.mkdir(parents=True, exist_ok=True)
+        (live_dir / "meta.json").write_text(
+            json.dumps(
+                {"etiket": "canli_eski", "durum": "calisiyor", "pid": live_proc.pid}
+            ),
+            encoding="utf-8",
+        )
+        os.utime(live_dir, (old_ts, old_ts))
+
+        res = run_ajan(["temizle", "--gun", "7"], env=env)
+        assert res.returncode == 0
+        assert not valid_dir.exists()
+        assert unrelated_dir.exists()
+        assert corrupt_dir.exists()
+        assert live_dir.exists()
+    finally:
+        live_proc.terminate()
+        live_proc.wait(timeout=5)
+
+
+def test_is_pid_alive_zombi_ve_cocuk_toplama(tmp_path: Any) -> None:
+    """
+    is_pid_alive hem çocuk zombiyi waitpid ile toplayıp False dönmeli,
+    hem de çocuk olmayan zombiyi /proc/<pid>/stat 'Z' alanından ölü saymalıdır.
+    """
+    # 1. Doğrudan çocuk zombi (waitpid ile toplanır)
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        try:
+            stat_txt = open(f"/proc/{child.pid}/stat", encoding="utf-8").read()
+            rp = stat_txt.rfind(")")
+            if rp != -1 and stat_txt[rp + 1 :].lstrip().startswith("Z"):
+                break
+        except OSError:
+            break
+        time.sleep(0.02)
+    assert is_pid_alive(child.pid) is False
+
+    # 2. Çocuk olmayan zombi (/proc/<pid>/stat durum 'Z' kontrolü)
+    pid_file = tmp_path / "grandchild.pid"
+    parent_proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import subprocess, sys, time; "
+                "gc = subprocess.Popen([sys.executable, '-c', 'pass']); "
+                f"open({repr(str(pid_file))}, 'w').write(str(gc.pid)); "
+                "time.sleep(10)"
+            ),
+        ]
+    )
+    try:
+        deadline = time.time() + 3.0
+        while not pid_file.exists() and time.time() < deadline:
+            time.sleep(0.02)
+        gc_pid = int(pid_file.read_text(encoding="utf-8").strip())
+
+        # Torunun zombi ('Z') haline gelmesini bekle
+        while time.time() < deadline:
+            stat_txt = open(f"/proc/{gc_pid}/stat", encoding="utf-8").read()
+            rp = stat_txt.rfind(")")
+            if rp != -1 and stat_txt[rp + 1 :].lstrip().startswith("Z"):
+                break
+            time.sleep(0.02)
+
+        assert is_pid_alive(gc_pid) is False
+    finally:
+        parent_proc.terminate()
+        parent_proc.wait(timeout=5)
+
+
+def test_izle_surec_kayip_olunca_cikar(test_env: dict[str, Any]) -> None:
+    """cmd_izle döngüde durum=='calisiyor' iken gorev_canli False ise 'süreç kayıp' iletisiyle çıkmalıdır."""
+    env = test_env["env"]
+    tdir = test_env["state_dir"] / "izle_kayip"
+    tdir.mkdir(parents=True, exist_ok=True)
+    (tdir / "meta.json").write_text(
+        json.dumps(
+            {
+                "etiket": "izle_kayip",
+                "durum": "calisiyor",
+                "pid": 99999999,
+                "bekci_pid": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tdir / "olaylar.jsonl").write_text(
+        json.dumps({"event": "init", "init": {"model": "test"}}) + "\n",
+        encoding="utf-8",
+    )
+
+    res = run_ajan(["izle", "izle_kayip"], env=env, timeout=4.0)
+    assert res.returncode == 1
+    assert "süreç kayıp" in (res.stdout + res.stderr).lower()
+
+
+def test_dogrula_sifir_tur_ve_calistir_devam_hatasi(test_env: dict[str, Any]) -> None:
+    """
+    --tur 0 en fazla 1 test çalıştırıp 0 düzeltme turu yapmalı;
+    calistir_devam sıfır dışı dönerse döngüden çıkıp DOGRULANAMADI yazmalıdır.
+    """
+    env = test_env["env"]
+
+    # 1. --tur 0 -> 1 test çalıştırması, 0 düzeltme
+    res_b1 = run_ajan(["baslat", "dogrula_0", "-m", "iş", "--bekle"], env=env)
+    assert res_b1.returncode == 0
+    res_d0 = run_ajan(
+        ["dogrula", "dogrula_0", "--test", f"{sys.executable} -c 'exit(1)'", "--tur", "0"],
+        env=env,
+    )
+    assert res_d0.returncode == 1
+    assert "DOGRULANAMADI" in res_d0.stdout
+    meta0 = json.loads((test_env["state_dir"] / "dogrula_0" / "meta.json").read_text(encoding="utf-8"))
+    assert len(meta0["dogrulama"]) == 1
+    assert meta0["tur"] == 1
+
+    # 2. calistir_devam sıfır dışı döndüğünde (ör. error modu) döngü devam etmemeli
+    res_b2 = run_ajan(["baslat", "dogrula_devam_err", "-m", "iş", "--bekle"], env=env)
+    assert res_b2.returncode == 0
+
+    env_err = dict(env, FAKE_AGY_MODE="error")
+    res_d_err = run_ajan(
+        [
+            "dogrula",
+            "dogrula_devam_err",
+            "--test",
+            f"{sys.executable} -c 'exit(1)'",
+            "--tur",
+            "3",
+        ],
+        env=env_err,
+    )
+    assert res_d_err.returncode == 1
+    assert "DOGRULANAMADI" in res_d_err.stdout
+    meta_err = json.loads(
+        (test_env["state_dir"] / "dogrula_devam_err" / "meta.json").read_text(encoding="utf-8")
+    )
+    # İlk test başarısız oldu -> 1. düzeltme calistir_devam hata döndü -> döngüden çıktı (yalnız 1 test kaydı)
+    assert len(meta_err["dogrulama"]) == 1
+
+    # 3. --tur yardım metni N+1 açıklaması içermeli
+    res_help = run_ajan(["dogrula", "--help"], env=env)
+    assert res_help.returncode == 0
+    assert "N+1" in res_help.stdout
+
+
+def test_wait_for_tasks_iptal_yazim_yarisi_tekrar_okur(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: Any
+) -> None:
+    """
+    wait_for_tasks durum=='calisiyor' ve süreç ölü iken 'kayip' demeden önce
+    meta.json'u bir kez daha okuyup değişmiş durumu (ör. 'iptal') raporlamalıdır.
+    """
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("AJAN_DIZIN", str(state_dir))
+    tdir = state_dir / "yaris_bekle"
+    tdir.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "etiket": "yaris_bekle",
+        "durum": "calisiyor",
+        "pid": 99999999,
+        "bekci_pid": None,
+        "tur": 1,
+        "sure_s": 1.0,
+        "yazilan_dosyalar": [],
+    }
+    ajan.save_meta(str(tdir), meta)
+
+    def racing_gorev_canli(m: dict[str, Any] | None) -> bool:
+        # Yarışı simüle et: gorev_canli False dönmeden az önce iptal meta'ya yazılmış olsun
+        updated = dict(m or {})
+        updated["durum"] = "iptal"
+        ajan.save_meta(str(tdir), updated)
+        return False
+
+    monkeypatch.setattr(ajan, "gorev_canli", racing_gorev_canli)
+    rc = ajan.wait_for_tasks(["yaris_bekle"], zaman_asimi=2.0)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "iptal" in out.lower()
+    assert "kayip" not in out.lower()
+
+
+def test_varsayilan_model_cli_uzerinden_hydrogen(test_env: dict[str, Any]) -> None:
+    """--model verilmediğinde agy CLI'a varsayılan gemini-4-hydrogen-xhigh aktarılmalıdır."""
+    env = test_env["env"]
+    res = run_ajan(["baslat", "varsayilan_model", "-m", "test", "--bekle"], env=env)
+    assert res.returncode == 0
+    calls = [
+        json.loads(line)
+        for line in open(test_env["log_path"], encoding="utf-8")
+        if line.strip()
+    ]
+    argv = calls[0]["argv"]
+    m_idx = argv.index("--model")
+    assert argv[m_idx + 1] == "gemini-4-hydrogen-xhigh"
