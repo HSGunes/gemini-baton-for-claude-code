@@ -321,7 +321,10 @@ def run_ajan(
 # ---------------------------------------------------------------------------
 def test_model_takma_adlari() -> None:
     """Model takma adlarının doğru çözümlendiğini doğrular."""
-    assert DEFAULT_MODEL == "gemini-4-hydrogen-xhigh"
+    assert DEFAULT_MODEL == "gemini-4-neon-xhigh"
+    assert resolve_model("neon") == "gemini-4-neon-xhigh"
+    assert resolve_model("neon-high") == "gemini-4-neon-high"
+    assert resolve_model("neon-orta") == "gemini-4-neon-medium"
     assert resolve_model("flash") == "gemini-3.8-flash-high"
     assert resolve_model("flash-orta") == "gemini-3.8-flash-medium"
     assert resolve_model("argon") == "gemini-4-argon-high"
@@ -329,7 +332,7 @@ def test_model_takma_adlari() -> None:
     assert resolve_model("hydrogen") == "gemini-4-hydrogen-xhigh"
     assert resolve_model("hydrogen-high") == "gemini-4-hydrogen-high"
     assert resolve_model("hydrogen-orta") == "gemini-4-hydrogen-medium"
-    assert resolve_model(None) == "gemini-4-hydrogen-xhigh"
+    assert resolve_model(None) == "gemini-4-neon-xhigh"
     assert resolve_model("claude-sonnet-5-5-high") == "claude-sonnet-5-5-high"
 
 
@@ -1738,8 +1741,8 @@ def test_wait_for_tasks_iptal_yazim_yarisi_tekrar_okur(
     assert "kayip" not in out.lower()
 
 
-def test_varsayilan_model_cli_uzerinden_hydrogen(test_env: dict[str, Any]) -> None:
-    """--model verilmediğinde agy CLI'a varsayılan gemini-4-hydrogen-xhigh aktarılmalıdır."""
+def test_varsayilan_model_cli_uzerinden_neon(test_env: dict[str, Any]) -> None:
+    """--model verilmediğinde agy CLI'a varsayılan gemini-4-neon-xhigh aktarılmalıdır."""
     env = test_env["env"]
     res = run_ajan(["baslat", "varsayilan_model", "-m", "test", "--bekle"], env=env)
     assert res.returncode == 0
@@ -1750,7 +1753,7 @@ def test_varsayilan_model_cli_uzerinden_hydrogen(test_env: dict[str, Any]) -> No
     ]
     argv = calls[0]["argv"]
     m_idx = argv.index("--model")
-    assert argv[m_idx + 1] == "gemini-4-hydrogen-xhigh"
+    assert argv[m_idx + 1] == "gemini-4-neon-xhigh"
 
 
 # ---------------------------------------------------------------------------

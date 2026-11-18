@@ -26,12 +26,15 @@ MODEL_ALIASES: dict[str, str] = {
     "flash-orta": "gemini-3.8-flash-medium",
     "argon": "gemini-4-argon-high",
     "argon-orta": "gemini-4-argon-medium",
+    "neon": "gemini-4-neon-xhigh",
+    "neon-high": "gemini-4-neon-high",
+    "neon-orta": "gemini-4-neon-medium",
     "hydrogen": "gemini-4-hydrogen-xhigh",
     "hydrogen-high": "gemini-4-hydrogen-high",
     "hydrogen-orta": "gemini-4-hydrogen-medium",
 }
 
-DEFAULT_MODEL = "gemini-4-hydrogen-xhigh"
+DEFAULT_MODEL = "gemini-4-neon-xhigh"
 
 ETIKET_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
@@ -1464,7 +1467,7 @@ def cmd_durum(args: argparse.Namespace) -> None:
         )
         yazilan_sayisi = len(meta.get("yazilan_dosyalar", []))
         son_adim = meta.get("son_adim") or "-"
-        model = meta.get("model") or "hydrogen"
+        model = meta.get("model") or "neon"
         tur = meta.get("tur", 1)
 
         dogrulama_sonucu = "-"
@@ -2004,8 +2007,8 @@ def main() -> None:
     g_input.add_argument("-m", "--mesaj", "--message", help="Görev metni")
     p_baslat.add_argument(
         "--model",
-        default="hydrogen",
-        help="Model (hydrogen, hydrogen-high, hydrogen-orta, flash, flash-orta, argon, argon-orta veya tam kimlik)",
+        default="neon",
+        help="Model (neon, neon-high, neon-orta, hydrogen, hydrogen-high, hydrogen-orta, flash, flash-orta, argon, argon-orta veya tam kimlik)",
     )
     p_baslat.add_argument(
         "--effort",

@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "baton",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Claude Code plans & verifies, Gemini (agy CLI) implements: a sub-agent orchestrator plugin. Start Gemini tasks in the background, wait, run your own tests, continue in the same conversation; saves Claude usage.",
   "author": {
     "name": "HSGunes",

@@ -93,7 +93,7 @@ baton dogrula parser-fix --test "python3 -m pytest tests/test_parser.py" --tur 2
 
 ```text
 TAG         MODEL     STATUS  VERIFY  ROUND  DURATION  LAST STEP       FILES  TOKENS
-parser-fix  hydrogen  bitti   -       1      84.2s     agent_response  1      243461
+parser-fix  neon      bitti   -       1      84.2s     agent_response  1      243461
 ```
 
 For longer tasks, put the context in Markdown files and pass them with `-g` (`-g A -g B` and `-g A B` both accept multiple files; see [examples/GOREV_ORNEK.md](examples/GOREV_ORNEK.md)).
@@ -117,7 +117,7 @@ Subcommands are Turkish. The English meaning is in the second column.
 
 Task tags (`<tag>`) may only contain `[A-Za-z0-9._-]` and must be 1–64 characters long.
 
-Model aliases: `hydrogen` → `gemini-4-hydrogen-xhigh` (default), `hydrogen-high`, `hydrogen-orta`, `flash` → `gemini-3.8-flash-high`, `flash-orta` → `gemini-3.8-flash-medium`, `argon` → `gemini-4-argon-high`, `argon-orta` → `gemini-4-argon-medium`. You can also pass any full model ID.
+Model aliases: `neon` → `gemini-4-neon-xhigh` (default), `neon-high`, `neon-orta`, `hydrogen` → `gemini-4-hydrogen-xhigh`, `hydrogen-high`, `hydrogen-orta`, `flash` → `gemini-3.8-flash-high`, `flash-orta` → `gemini-3.8-flash-medium`, `argon` → `gemini-4-argon-high`, `argon-orta` → `gemini-4-argon-medium`. You can also pass any full model ID.
 
 ## Configuration
 

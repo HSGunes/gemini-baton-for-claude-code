@@ -107,7 +107,7 @@ Uzun işlerde bağlamı Markdown dosyalarına yazıp `-g` ile ver (`-g A -g B` v
 
 Görev etiketleri (`<etiket>`) yalnız `[A-Za-z0-9._-]` karakterlerinden oluşabilir ve 1–64 karakter uzunluğunda olmalıdır.
 
-Model takma adları: `hydrogen` → `gemini-4-hydrogen-xhigh` (varsayılan), `hydrogen-high`, `hydrogen-orta`, `flash` → `gemini-3.8-flash-high`, `flash-orta` → `gemini-3.8-flash-medium`, `argon` → `gemini-4-argon-high`, `argon-orta` → `gemini-4-argon-medium`. İstersen tam model kimliğini de verebilirsin.
+Model takma adları: `neon` → `gemini-4-neon-xhigh` (varsayılan), `neon-high`, `neon-orta`, `hydrogen` → `gemini-4-hydrogen-xhigh`, `hydrogen-high`, `hydrogen-orta`, `flash` → `gemini-3.8-flash-high`, `flash-orta` → `gemini-3.8-flash-medium`, `argon` → `gemini-4-argon-high`, `argon-orta` → `gemini-4-argon-medium`. İstersen tam model kimliğini de verebilirsin.
 
 ## Yapılandırma
 

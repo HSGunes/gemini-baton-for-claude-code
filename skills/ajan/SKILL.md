@@ -1,6 +1,6 @@
 ---
 name: ajan
-description: Gemini alt ajanı (agy CLI üzerinde `baton` aracı, eski adı `ajan`). Uygulama işini Gemini'ye devretmek, durumunu izlemek, aynı konuşmada düzeltme istemek ve sonucu doğrulamak için kullan. Kullanıcı "geminiye ver", "hydrogen'e ver", "flash'a ver", "alt ajana ver", "delege et", "delegate to Gemini", "give this to Gemini", "hand off to a sub-agent", "use hydrogen", "use Gemini for implementation" dediğinde ya da büyük/tekrarlı uygulama işinde.
+description: Gemini alt ajanı (agy CLI üzerinde `baton` aracı, eski adı `ajan`). Uygulama işini Gemini'ye devretmek, durumunu izlemek, aynı konuşmada düzeltme istemek ve sonucu doğrulamak için kullan. Kullanıcı "geminiye ver", "neon'a ver", "hydrogen'e ver", "flash'a ver", "alt ajana ver", "delege et", "delegate to Gemini", "give this to Gemini", "hand off to a sub-agent", "use neon", "use hydrogen", "use Gemini for implementation" dediğinde ya da büyük/tekrarlı uygulama işinde.
 ---
 
 # ajan — Gemini alt ajanı ile çalışma
@@ -13,10 +13,11 @@ Tüm döngüyü ana bağlamı harcamadan yürütmek için `baton:ajan-yonetici` 
 (ya da kullanıcı `/baton:devret <iş>` der). Aşağıdaki akış, döngüyü elle yürütmek içindir.
 
 ## Model seçimi
-- Varsayılan `hydrogen` (`gemini-4-hydrogen-xhigh`, `--model` verilmezse kullanılır): çoğu iş. Diğer seçenekler: `hydrogen-high`, `hydrogen-orta`.
+- Varsayılan `neon` (`gemini-4-neon-xhigh`, `--model` verilmezse kullanılır): her iş için ilk tercih. Diğer seçenekler: `neon-high`, `neon-orta`.
+- `--model hydrogen` (`gemini-4-hydrogen-xhigh`): yalnız neon kullanılamazsa (geçersiz model / kota hatası) yedek.
 - `--model flash-orta` (`gemini-3.8-flash-medium`): basit, mekanik işler (daha az thinking token).
 - `--model argon` (`gemini-4-argon-high`, ayrıca `argon-orta`, `flash`): alternatif modeller.
-- Kullanıcı aksini söylemedikçe varsayılan `hydrogen` kullanılır (özel durum olmadıkça `--model` verme).
+- Kullanıcı aksini söylemedikçe varsayılan `neon` kullanılır (özel durum olmadıkça `--model` verme).
 
 ## Akış
 1. **Görev dosyası yaz** (`GOREV_X.md`): bağlam (ilgili dosyaları OKU de), arayüz/imzalar, davranış,
