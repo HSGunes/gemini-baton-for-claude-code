@@ -23,7 +23,7 @@ Sen ─▶ Claude Code            planlar, görev dosyasını yazar, senin testl
 - **Dar yazma izni.** Gemini yalnız `--yaz` ile verilen dizinlere yazabilir. Eksik izin kuralı olursa görev, token harcanmadan çıkış 2 ile durur.
 - **Varsayılan sandbox.** `--komut` verilmezse terminal kapalıdır (`--sandbox`).
 - **Claude bağlamını şişirmez.** `rapor` kısa bir özet basar; isteğe bağlı alt ajan döngünün tamamını ana oturumun dışında tutar.
-- **Sıfır bağımlılık.** Tek Python 3.10+ dosyası, yalnız standart kütüphane. 26 test sahte bir `agy` ile çalışır.
+- **Sıfır bağımlılık.** Tek Python 3.10+ dosyası, yalnız standart kütüphane. 42 test sahte bir `agy` ile çalışır.
 
 ## Gereksinimler
 

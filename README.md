@@ -23,7 +23,7 @@ You ─▶ Claude Code            plans, writes the task file, verifies with you
 - **Narrow write access.** Gemini may only write to the `--yaz` directories. Missing rules stop the run with exit code 2 before any tokens are spent.
 - **Sandboxed by default.** With no `--komut` prefixes the terminal is disabled (`--sandbox`).
 - **Context-friendly for Claude.** `rapor` prints a compact summary, and the optional subagent keeps the whole loop out of your main session.
-- **Zero dependencies.** A single Python 3.10+ file using only the standard library, with 26 tests that run against a fake `agy`.
+- **Zero dependencies.** A single Python 3.10+ file using only the standard library, with 42 tests that run against a fake `agy`.
 
 ## Requirements
 
