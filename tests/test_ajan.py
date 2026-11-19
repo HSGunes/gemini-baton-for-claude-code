@@ -31,40 +31,25 @@ from ajan import (
 AJAN_PY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ajan.py"))
 
 
-@pytest.fixture(autouse=True)
-def isolate_defaults(
-    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
-) -> None:
-    """
-    Tüm testler için varsayılan ortamı izole eder.
-    Gerçek ~/.gemini ve ~/.local/state/ajan dizinlerine erişimi tamamen engeller.
-    """
-    temp_dir = tmp_path_factory.mktemp("safe_default")
-    safe_state = temp_dir / "safe_state"
-    safe_settings = temp_dir / "gemini" / "settings.json"
-    safe_state.mkdir(parents=True, exist_ok=True)
-    safe_settings.parent.mkdir(parents=True, exist_ok=True)
-    safe_settings.write_text(
-        json.dumps({"permissions": {"allow": []}}), encoding="utf-8"
-    )
-
-    monkeypatch.setenv("AJAN_DIZIN", str(safe_state))
-    monkeypatch.setenv("AJAN_AYAR", str(safe_settings))
-    monkeypatch.setenv("AJAN_DIL", "tr")
+DEFAULT_FAKE_MODELS_OUTPUT = """Fetching available models...
+gemini-4-neon-high\tGemini 4 Neon (High)
+gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)
+gemini-4-neon-medium\tGemini 4 Neon (Medium)
+gemini-4-neon-low\tGemini 4 Neon (Low)
+gemini-4-argon-medium\tGemini 4 Argon (Medium)
+gemini-4-hydrogen-xhigh\tGemini 4 Hydrogen (XHigh)
+gemini-pro-orchestrator-neon\tOrchestrator (Neon)
+gemini-3.8-flash-high\tGemini 3.8 Flash (High)
+claude-opus-5-5-high\tClaude Opus 5.5 (High)
+gpt-oss-120b-medium\tGPT-OSS 120B (Medium)
+"""
 
 
-# ---------------------------------------------------------------------------
-# Sahte agy Fixture
-# ---------------------------------------------------------------------------
-@pytest.fixture
-def fake_agy(tmp_path: Any) -> tuple[str, str]:
-    """
-    Sahte agy ikilisi betiği oluşturur.
-    Argümanları fake_agy.log dosyasına JSON olarak kaydeder.
-    FAKE_AGY_MODE değişkenine göre stream-json davranışı sergiler.
-    """
-    log_file = tmp_path / "fake_agy.log"
-    script_file = tmp_path / "fake_agy.py"
+def _write_fake_agy(target_dir: Any) -> tuple[str, str, str]:
+    """Sahte agy ikilisini hedef dizine yazar; (betik, log, models_log) döner."""
+    log_file = target_dir / "fake_agy.log"
+    models_log_file = target_dir / "fake_agy_models.log"
+    script_file = target_dir / "fake_agy.py"
 
     code = f"""#!/usr/bin/env python3
 import json
@@ -73,6 +58,24 @@ import sys
 import time
 
 log_file = {repr(str(log_file))}
+models_log_file = {repr(str(models_log_file))}
+default_models_out = {repr(DEFAULT_FAKE_MODELS_OUTPUT)}
+
+# `agy models` çağrısı: fake_agy.log'a yazmadan ayrı log'a kaydet
+if len(sys.argv) >= 2 and sys.argv[1] == "models":
+    with open(models_log_file, "a", encoding="utf-8") as mf:
+        mf.write(json.dumps({{"argv": sys.argv[1:]}}) + "\\n")
+    if os.environ.get("FAKE_AGY_MODELS_FAIL") == "1":
+        sys.stderr.write("ERROR: failed to fetch models\\n")
+        sys.exit(1)
+    models_file = os.environ.get("FAKE_AGY_MODELS")
+    if models_file and os.path.isfile(models_file):
+        with open(models_file, "r", encoding="utf-8") as src:
+            sys.stdout.write(src.read())
+    else:
+        sys.stdout.write(default_models_out)
+    sys.exit(0)
+
 mode = os.environ.get("FAKE_AGY_MODE", "success")
 
 # Argümanları kaydet
@@ -126,7 +129,7 @@ elif mode == "error":
 elif mode == "varied_keys":
     init_ev = {{"event": "init", "conversation_id": conv_id, "init": {{"model": "test-model"}}}}
     print(json.dumps(init_ev), flush=True)
-    
+
     # Farklı parametre anahtarlarıyla write_file adımları
     tools = [
         ("write_file", {{"Path": "/workspace/path1.py"}}),
@@ -151,7 +154,7 @@ elif mode == "varied_keys":
             }}
         }}
         print(json.dumps(step_ev), flush=True)
-        
+
     res_ev = {{
         "event": "result",
         "result": {{
@@ -260,13 +263,60 @@ else:
 """
     script_file.write_text(code, encoding="utf-8")
     script_file.chmod(script_file.stat().st_mode | stat.S_IEXEC)
-    return str(script_file), str(log_file)
+    return str(script_file), str(log_file), str(models_log_file)
+
+
+@pytest.fixture(autouse=True)
+def isolate_defaults(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """
+    Tüm testler için varsayılan ortamı izole eder.
+    Gerçek ~/.gemini, ~/.local/state/ajan ve gerçek agy erişimini engeller.
+    """
+    temp_dir = tmp_path_factory.mktemp("safe_default")
+    safe_state = temp_dir / "safe_state"
+    safe_settings = temp_dir / "gemini" / "settings.json"
+    safe_agy_dir = temp_dir / "safe_agy"
+    safe_state.mkdir(parents=True, exist_ok=True)
+    safe_settings.parent.mkdir(parents=True, exist_ok=True)
+    safe_agy_dir.mkdir(parents=True, exist_ok=True)
+    safe_settings.write_text(
+        json.dumps({"permissions": {"allow": []}}), encoding="utf-8"
+    )
+    default_fake_bin, _, _ = _write_fake_agy(safe_agy_dir)
+
+    monkeypatch.setenv("AJAN_DIZIN", str(safe_state))
+    monkeypatch.setenv("AJAN_AYAR", str(safe_settings))
+    monkeypatch.setenv("AJAN_AGY", default_fake_bin)
+    monkeypatch.setenv("AJAN_DIL", "tr")
+    monkeypatch.delenv("AJAN_MODEL", raising=False)
+    monkeypatch.delenv("FAKE_AGY_MODELS", raising=False)
+    monkeypatch.delenv("FAKE_AGY_MODELS_FAIL", raising=False)
+    ajan._CATALOG_MEMO.clear()
+
+
+# ---------------------------------------------------------------------------
+# Sahte agy Fixture
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def fake_agy(tmp_path: Any) -> tuple[str, str]:
+    """
+    Sahte agy ikilisi betiği oluşturur.
+    Argümanları fake_agy.log dosyasına JSON olarak kaydeder.
+    FAKE_AGY_MODE değişkenine göre stream-json davranışı sergiler.
+    """
+    script_file, log_file, _ = _write_fake_agy(tmp_path)
+    return script_file, log_file
 
 
 @pytest.fixture
 def test_env(tmp_path: Any, fake_agy: tuple[str, str]) -> dict[str, Any]:
     """Testler için yalıtılmış ortam ve dizinleri hazırlar."""
     fake_bin, log_path = fake_agy
+    models_log_path = os.path.join(
+        os.path.dirname(log_path), "fake_agy_models.log"
+    )
     state_dir = tmp_path / "ajan_state"
     settings_dir = tmp_path / "gemini_config"
     settings_path = settings_dir / "settings.json"
@@ -285,12 +335,16 @@ def test_env(tmp_path: Any, fake_agy: tuple[str, str]) -> dict[str, Any]:
     env["AJAN_AYAR"] = str(settings_path)
     env["AJAN_DIL"] = "tr"
     env["FAKE_AGY_LOG"] = log_path
+    env.pop("AJAN_MODEL", None)
+    env.pop("FAKE_AGY_MODELS", None)
+    env.pop("FAKE_AGY_MODELS_FAIL", None)
 
     return {
         "env": env,
         "state_dir": state_dir,
         "settings_path": settings_path,
         "log_path": log_path,
+        "models_log_path": models_log_path,
     }
 
 
@@ -1327,18 +1381,20 @@ def test_etiket_dogrulama_tum_komutlar_ve_symlink(test_env: dict[str, Any], tmp_
 
 
 def test_meta_yarisi_gecici_dosya_ve_bekci_pid_koruma(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, fake_agy: tuple[str, str]
 ) -> None:
     """
     (a) save_meta benzersiz geçici dosya kullanmalı.
     (b) cmd_baslat ve calistir_devam bekçi başlatıldıktan sonra meta.json'u yeniden okuyup
         yalnız bekci_pid'i güncellemeli; calistir_devam pid=None atamasını bekçiden önce yapmalı.
     """
+    fake_bin, _ = fake_agy
     state_dir = tmp_path / "state"
     settings_path = tmp_path / "settings.json"
     settings_path.write_text(json.dumps({"permissions": {"allow": []}}), encoding="utf-8")
     monkeypatch.setenv("AJAN_DIZIN", str(state_dir))
     monkeypatch.setenv("AJAN_AYAR", str(settings_path))
+    monkeypatch.setenv("AJAN_AGY", fake_bin)
 
     # (a) os.replace'e verilen geçici dosya meta.json.tmp değil, benzersiz olmalı
     tmp_sources: list[str] = []
@@ -1359,6 +1415,7 @@ def test_meta_yarisi_gecici_dosya_ve_bekci_pid_koruma(
     monkeypatch.undo()
     monkeypatch.setenv("AJAN_DIZIN", str(state_dir))
     monkeypatch.setenv("AJAN_AYAR", str(settings_path))
+    monkeypatch.setenv("AJAN_AGY", fake_bin)
 
     # (b1) cmd_baslat testi
     class FakeProc:
@@ -2070,4 +2127,897 @@ def test_skill_md_frontmatter_tr_ve_en_tetikleyiciler() -> None:
         "use Gemini for implementation",
     ]:
         assert trigger in desc_line
+
+
+# ---------------------------------------------------------------------------
+# v0.7.0 Sağlamlaştırma Testleri
+# ---------------------------------------------------------------------------
+def test_run_dogrulama_komut_zaman_asimi_kismi_cikti_ve_dil(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    run_dogrulama_komut zaman aşımında bytes/str kısmi çıktıyı korumalı,
+    AJAN_DIL'e göre zaman aşımı notu eklemeli ve çıkış kodu 124 dönmelidir.
+    """
+    slow_cmd = (
+        f'{sys.executable} -c '
+        '"import time; print(\'kismi\', flush=True); time.sleep(30)"'
+    )
+
+    monkeypatch.setenv("AJAN_DIL", "tr")
+    rc_tr, out_tr = ajan.run_dogrulama_komut(slow_cmd, zaman_asimi=1)
+    assert rc_tr == 124
+    assert "kismi" in out_tr
+    assert "Zaman aşımı" in out_tr
+
+    monkeypatch.setenv("AJAN_DIL", "en")
+    rc_en, out_en = ajan.run_dogrulama_komut(slow_cmd, zaman_asimi=1)
+    assert rc_en == 124
+    assert "kismi" in out_en
+    assert "Timeout" in out_en
+
+    # bytes stdout (bozuk UTF-8 dahil) + bytes stderr durumu
+    def fake_run_timeout(*args: Any, **kwargs: Any) -> Any:
+        raise subprocess.TimeoutExpired(
+            cmd="slow",
+            timeout=2,
+            output=b"kismi_bytes_\xff\n",
+            stderr=b"err_bytes\n",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run_timeout)
+    monkeypatch.setenv("AJAN_DIL", "tr")
+    rc_b, out_b = ajan.run_dogrulama_komut("slow", zaman_asimi=2)
+    assert rc_b == 124
+    assert "kismi_bytes_" in out_b
+    assert "err_bytes" in out_b
+    assert "Zaman aşımı (2s)" in out_b
+
+
+def test_cmd_dogrula_zaman_asimi_takip_mesaji_ve_stderr_kuyrugu(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: Any
+) -> None:
+    """
+    cmd_dogrula zaman aşımında kısmi çıktıyı takip mesajına (son 40 satır) aktarmalı
+    ve DOGRULANAMADI öncesinde son ~20 satırı stderr'e yazdırmalıdır.
+    """
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("AJAN_DIZIN", str(state_dir))
+    task_dir = state_dir / "timeout_dogrula"
+    task_dir.mkdir(parents=True, exist_ok=True)
+    ajan.save_meta(
+        str(task_dir),
+        {
+            "etiket": "timeout_dogrula",
+            "durum": "bitti",
+            "conversation_id": "conv-timeout-1",
+            "tur": 1,
+            "dogrulama": [],
+        },
+    )
+
+    sent_messages: list[str] = []
+
+    def fake_calistir_devam(
+        etiket: str, mesaj: str, bekle: bool = False, zaman_asimi: float | None = None
+    ) -> int:
+        sent_messages.append(mesaj)
+        return 0
+
+    monkeypatch.setattr(ajan, "calistir_devam", fake_calistir_devam)
+
+    slow_cmd = (
+        f'{sys.executable} -c '
+        '"import time; print(\'kismi_takip\', flush=True); time.sleep(30)"'
+    )
+    args = type(
+        "Args",
+        (),
+        {
+            "etiket": "timeout_dogrula",
+            "test": slow_cmd,
+            "tur": 1,
+            "cwd": None,
+            "zaman_asimi": 1,
+        },
+    )()
+
+    with pytest.raises(SystemExit) as exc:
+        ajan.cmd_dogrula(args)
+    assert exc.value.code == 1
+
+    captured = capsys.readouterr()
+    assert "DOGRULANAMADI (1 tur)" in captured.out
+    assert "kismi_takip" in captured.err
+    assert "Zaman aşımı" in captured.err
+
+    assert len(sent_messages) == 1
+    assert "kismi_takip" in sent_messages[0]
+    assert "Zaman aşımı" in sent_messages[0]
+    assert "testleri gevşetme" in sent_messages[0]
+
+    # 60 satırlık başarısız çıktıda takip mesajı son 40 satırı, stderr son 20 satırı içermeli
+    sent_messages.clear()
+    many_lines = "\n".join(f"satir_{i:02d}" for i in range(1, 61))
+    monkeypatch.setattr(
+        ajan, "run_dogrulama_komut", lambda *a, **kw: (1, many_lines)
+    )
+    with pytest.raises(SystemExit) as exc2:
+        ajan.cmd_dogrula(args)
+    assert exc2.value.code == 1
+
+    cap2 = capsys.readouterr()
+    assert "DOGRULANAMADI (1 tur)" in cap2.out
+    assert "satir_60" in cap2.err
+    assert "satir_41" in cap2.err
+    assert "satir_40" not in cap2.err
+
+    assert len(sent_messages) == 1
+    assert "satir_60" in sent_messages[0]
+    assert "satir_21" in sent_messages[0]
+    assert "satir_20" not in sent_messages[0]
+
+
+def test_add_permissions_atomik_yazma_ve_hata_temizligi(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """
+    add_permissions settings.json'u atomik yazmalı: sonrasında .tmp kalmamalı,
+    os.replace hata verirse orijinal dosya bozulmamalı, tmp temizlenmeli ve ValueError fırlatılmalıdır.
+    """
+    settings_path = tmp_path / "settings.json"
+    orig_content = json.dumps({"permissions": {"allow": ["command(ls)"]}}, indent=2) + "\n"
+    settings_path.write_text(orig_content, encoding="utf-8")
+
+    # 1. Başarılı atomik yazma: .tmp kalmamalı, .bak oluşmalı
+    bak = add_permissions(["write_file(/tmp/atomik)"], str(settings_path))
+    assert bak and os.path.isfile(bak)
+    assert list(tmp_path.glob("*.tmp")) == []
+    updated = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert "write_file(/tmp/atomik)" in updated["permissions"]["allow"]
+
+    # 2. os.replace hata verirse orijinal korunmalı, .tmp temizlenmeli, ValueError fırlatılmalı
+    before_fail = settings_path.read_text(encoding="utf-8")
+
+    def failing_replace(src: str, dst: str) -> None:
+        assert src.endswith(".tmp")
+        assert os.path.exists(src)
+        raise OSError("simulated disk full")
+
+    monkeypatch.setattr(os, "replace", failing_replace)
+    with pytest.raises(ValueError) as exc_info:
+        add_permissions(["command(pytest)"], str(settings_path))
+    assert "yazılamadı" in str(exc_info.value)
+    assert settings_path.read_text(encoding="utf-8") == before_fail
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_argparse_help_tr_ve_en(test_env: dict[str, Any]) -> None:
+    """
+    AJAN_DIL=en iken --help ve alt komut --help çıktıları İngilizce,
+    AJAN_DIL yok veya tr iken Türkçe olmalıdır.
+    """
+    env_en = dict(test_env["env"], AJAN_DIL="en")
+    env_default = dict(test_env["env"])
+    env_default.pop("AJAN_DIL", None)
+
+    # 1. Ana --help (EN vs varsayılan TR)
+    res_en = run_ajan(["--help"], env=env_en)
+    assert res_en.returncode == 0
+    assert "Start a new" in res_en.stdout
+    assert "Yeni bir ajan görevi başlat" not in res_en.stdout
+
+    res_tr = run_ajan(["--help"], env=env_default)
+    assert res_tr.returncode == 0
+    assert "Yeni bir ajan görevi başlat" in res_tr.stdout
+    assert "Start a new" not in res_tr.stdout
+
+    # 2. baslat --help (EN vs varsayılan TR)
+    res_baslat_en = run_ajan(["baslat", "--help"], env=env_en)
+    assert res_baslat_en.returncode == 0
+    assert "Start a new agent task" in res_baslat_en.stdout
+    assert "Files containing the task description" in res_baslat_en.stdout
+    assert "Görev metnini içeren dosyalar" not in res_baslat_en.stdout
+
+    res_baslat_tr = run_ajan(["baslat", "--help"], env=env_default)
+    assert res_baslat_tr.returncode == 0
+    assert "Görev metnini içeren dosyalar" in res_baslat_tr.stdout
+    assert "Files containing the task description" not in res_baslat_tr.stdout
+
+    # 3. dogrula --help (EN)
+    res_dogrula_en = run_ajan(["dogrula", "--help"], env=env_en)
+    assert res_dogrula_en.returncode == 0
+    assert "Verification command to run" in res_dogrula_en.stdout
+    assert "N+1" in res_dogrula_en.stdout
+    assert "Çalıştırılacak doğrulama komutu" not in res_dogrula_en.stdout
+
+
+def test_build_gemini_md_kisa_ve_kritik_kurallar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    build_gemini_md hem TR hem EN için kısa olmalı ve kritik ifadeleri
+    (dizin listesi, komutlar, JSON şema anahtarları, testleri gevşetme yasağı) içermelidir.
+    """
+    required_json_keys = [
+        "ozet",
+        "degisen_dosyalar",
+        "calistirilan_testler",
+        "acik_konular",
+        "basarili",
+    ]
+    gorev = "MODUL_GOREVI"
+
+    monkeypatch.setenv("AJAN_DIL", "tr")
+    md_tr = ajan.build_gemini_md(["/proje/src", "/proje/tests"], ["pytest -q"], gorev)
+    assert "/proje/src" in md_tr and "/proje/tests" in md_tr
+    assert "pytest -q" in md_tr
+    assert "testleri gevşetme" in md_tr
+    assert gorev in md_tr
+    for k in required_json_keys:
+        assert f'"{k}"' in md_tr
+    assert len(md_tr) - len(gorev) < 400
+
+    monkeypatch.setenv("AJAN_DIL", "en")
+    md_en = ajan.build_gemini_md(["/proje/src"], ["pytest -q"], gorev)
+    assert "/proje/src" in md_en
+    assert "pytest -q" in md_en
+    assert "do not relax tests" in md_en
+    assert gorev in md_en
+    for k in required_json_keys:
+        assert f'"{k}"' in md_en
+    assert len(md_en) - len(gorev) < 400
+
+    # Boş izin listeleri
+    assert "none" in ajan.build_gemini_md([], [], "x")
+    monkeypatch.setenv("AJAN_DIL", "tr")
+    assert "yok" in ajan.build_gemini_md([], [], "x")
+
+
+def test_hata_agy_bulunamadi_baslat_ve_devam(
+    test_env: dict[str, Any], tmp_path: Any
+) -> None:
+    """
+    agy bulunamadığında veya çalıştırılamaz olduğunda baslat ve devam,
+    meta/dizin oluşturmadan tek satır hata basıp çıkış kodu 1 vermelidir.
+    """
+    state_dir = test_env["state_dir"]
+
+    # 1. baslat: var olmayan AJAN_AGY (TR ve EN)
+    env_missing = dict(test_env["env"], AJAN_AGY="/nonexistent/agy_missing_bin")
+    res_tr = run_ajan(["baslat", "agy_yok_tr", "-m", "test"], env=env_missing)
+    assert res_tr.returncode == 1
+    assert "Traceback" not in res_tr.stderr
+    assert len(res_tr.stderr.strip().splitlines()) == 1
+    assert "agy bulunamadı" in res_tr.stderr
+    assert not (state_dir / "agy_yok_tr").exists()
+
+    env_missing_en = dict(env_missing, AJAN_DIL="en")
+    res_en = run_ajan(["baslat", "agy_yok_en", "-m", "test"], env=env_missing_en)
+    assert res_en.returncode == 1
+    assert "Traceback" not in res_en.stderr
+    assert len(res_en.stderr.strip().splitlines()) == 1
+    assert "agy not found" in res_en.stderr
+    assert not (state_dir / "agy_yok_en").exists()
+
+    # 2. baslat: çalıştırılabilir olmayan dosya
+    non_exec = tmp_path / "not_exec_agy"
+    non_exec.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+    non_exec.chmod(0o644)
+    env_non_exec = dict(test_env["env"], AJAN_AGY=str(non_exec))
+    res_ne = run_ajan(["baslat", "agy_nonexec", "-m", "test"], env=env_non_exec)
+    assert res_ne.returncode == 1
+    assert "Traceback" not in res_ne.stderr
+    assert not (state_dir / "agy_nonexec").exists()
+
+    # 3. devam: mevcut bitmiş görevde agy eksikse meta değişmemeli ve çıkış 1 olmalı
+    res_ok = run_ajan(
+        ["baslat", "devam_agy_yok", "-m", "ilk tur", "--bekle"], env=test_env["env"]
+    )
+    assert res_ok.returncode == 0
+    meta_before = json.loads(
+        (state_dir / "devam_agy_yok" / "meta.json").read_text(encoding="utf-8")
+    )
+
+    res_devam = run_ajan(
+        ["devam", "devam_agy_yok", "-m", "ikinci tur"], env=env_missing
+    )
+    assert res_devam.returncode == 1
+    assert "Traceback" not in res_devam.stderr
+    assert len(res_devam.stderr.strip().splitlines()) == 1
+    assert "agy bulunamadı" in res_devam.stderr
+    meta_after = json.loads(
+        (state_dir / "devam_agy_yok" / "meta.json").read_text(encoding="utf-8")
+    )
+    assert meta_after["tur"] == meta_before["tur"]
+    assert meta_after["durum"] == "bitti"
+
+
+def test_hata_gecersiz_gorev_dosyasi_dizin_okunamaz_ve_utf8(
+    test_env: dict[str, Any], tmp_path: Any, monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """
+    Görev dosyası dizin, bozuk UTF-8 veya okunamayan (OSError) dosya ise
+    traceback olmadan tek satır hata basıp çıkış kodu 1 vermelidir.
+    """
+    env = test_env["env"]
+    env_en = dict(env, AJAN_DIL="en")
+
+    # 1. Dizin verilmesi
+    a_dir = tmp_path / "gorev_dizini"
+    a_dir.mkdir()
+    res_dir_tr = run_ajan(["baslat", "dizin_gorev", "-g", str(a_dir)], env=env)
+    assert res_dir_tr.returncode == 1
+    assert "Traceback" not in res_dir_tr.stderr
+    assert len(res_dir_tr.stderr.strip().splitlines()) == 1
+    assert "okunamadı" in res_dir_tr.stderr
+
+    res_dir_en = run_ajan(["baslat", "dizin_gorev_en", "-g", str(a_dir)], env=env_en)
+    assert res_dir_en.returncode == 1
+    assert "Traceback" not in res_dir_en.stderr
+    assert len(res_dir_en.stderr.strip().splitlines()) == 1
+    assert "Could not read task file" in res_dir_en.stderr
+
+    # 2. Geçersiz UTF-8 dosyası
+    bad_utf8 = tmp_path / "bozuk_utf8.bin"
+    bad_utf8.write_bytes(b"\x80\xff\xfe\x00gecersiz")
+    res_utf8_tr = run_ajan(["baslat", "utf8_gorev", "-g", str(bad_utf8)], env=env)
+    assert res_utf8_tr.returncode == 1
+    assert "Traceback" not in res_utf8_tr.stderr
+    assert len(res_utf8_tr.stderr.strip().splitlines()) == 1
+    assert "okunamadı" in res_utf8_tr.stderr
+
+    res_utf8_en = run_ajan(["baslat", "utf8_gorev_en", "-g", str(bad_utf8)], env=env_en)
+    assert res_utf8_en.returncode == 1
+    assert "Traceback" not in res_utf8_en.stderr
+    assert len(res_utf8_en.stderr.strip().splitlines()) == 1
+    assert "Could not read task file" in res_utf8_en.stderr
+
+    # 3. OSError (okunamayan dosya)
+    unreadable = tmp_path / "okunamaz.md"
+    unreadable.write_text("gizli", encoding="utf-8")
+    monkeypatch.setenv("AJAN_DIZIN", str(test_env["state_dir"]))
+    monkeypatch.setenv("AJAN_AYAR", str(test_env["settings_path"]))
+    monkeypatch.setenv("AJAN_AGY", env["AJAN_AGY"])
+
+    orig_open = open
+
+    def fail_open(file: Any, *args: Any, **kwargs: Any) -> Any:
+        if os.path.abspath(str(file)) == str(unreadable.resolve()):
+            raise PermissionError("Permission denied")
+        return orig_open(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", fail_open)
+    args = type(
+        "Args",
+        (),
+        {
+            "etiket": "okunamaz_gorev",
+            "gorev_dosyalari": [str(unreadable)],
+            "mesaj": None,
+            "model": "neon",
+            "effort": None,
+            "yaz": [],
+            "oku": [],
+            "komut": [],
+            "sure": None,
+            "sandbox": False,
+            "izin_ekle": False,
+            "bekle": False,
+        },
+    )()
+    with pytest.raises(SystemExit) as exc:
+        ajan.cmd_baslat(args)
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert len(err.strip().splitlines()) == 1
+    assert "okunamadı" in err
+
+
+def test_hata_settings_yok_ve_yazilamaz(
+    test_env: dict[str, Any], tmp_path: Any
+) -> None:
+    """
+    settings.json yokken izin kontrol boş liste gibi davranmalı (çıkış 2);
+    settings dizini oluşturulamıyorsa / yazılamıyorsa --izin-ekle traceback olmadan
+    tek satır hata basıp çıkış kodu 1 vermelidir.
+    """
+    # 1. settings.json yok -> çıkış 2 (eksik izin)
+    missing_settings = tmp_path / "olmayan_dizin" / "settings.json"
+    env_missing = dict(test_env["env"], AJAN_AYAR=str(missing_settings))
+    res_check = run_ajan(
+        ["izin", "kontrol", "--yaz", "/tmp/x"], env=env_missing
+    )
+    assert res_check.returncode == 2
+    assert "Traceback" not in res_check.stderr
+
+    # 2. settings dizini oluşturulamıyor (üst yol normal dosya)
+    blocker = tmp_path / "dosya_engel"
+    blocker.write_text("engel", encoding="utf-8")
+    blocked_settings = blocker / "alt" / "settings.json"
+    env_blocked = dict(test_env["env"], AJAN_AYAR=str(blocked_settings))
+
+    res_izin = run_ajan(
+        ["izin", "kontrol", "--yaz", "/tmp/x", "--izin-ekle"], env=env_blocked
+    )
+    assert res_izin.returncode == 1
+    assert "Traceback" not in res_izin.stderr
+    assert len(res_izin.stderr.strip().splitlines()) == 1
+    assert "yazılamadı" in res_izin.stderr
+
+    res_baslat = run_ajan(
+        ["baslat", "yazilamaz_ayar", "-m", "test", "--yaz", "/tmp/x", "--izin-ekle"],
+        env=env_blocked,
+    )
+    assert res_baslat.returncode == 1
+    assert "Traceback" not in res_baslat.stderr
+    assert len(res_baslat.stderr.strip().splitlines()) == 1
+    assert "yazılamadı" in res_baslat.stderr
+
+    # İngilizce hata mesajı
+    env_blocked_en = dict(env_blocked, AJAN_DIL="en")
+    res_en = run_ajan(
+        ["izin", "kontrol", "--yaz", "/tmp/x", "--izin-ekle"], env=env_blocked_en
+    )
+    assert res_en.returncode == 1
+    assert "Traceback" not in res_en.stderr
+    assert len(res_en.stderr.strip().splitlines()) == 1
+    assert "Could not write" in res_en.stderr
+
+
+# ---------------------------------------------------------------------------
+# Dinamik Model Kataloğu Testleri
+# ---------------------------------------------------------------------------
+def test_parse_models_output() -> None:
+    """parse_models_output ilk satırı/sekmesiz satırları atlamalı, tekrarları elemeli ve sırayı korumalıdır."""
+    raw = (
+        "Fetching available models...\n"
+        "WARN: some notice without tab\n"
+        "Error:\tnot a model id\n"
+        "12345\tnumeric only\n"
+        "gemini-4-neon-high\tGemini 4 Neon (High)\n"
+        "gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)\n"
+        "gemini-4-neon-high\tGemini 4 Neon (High Duplicate)\n"
+        "\x1b[32mgemini-3.8-flash-high\x1b[0m\tGemini 3.8 Flash (High)\n"
+        "claude-opus-5-5-high\tClaude Opus 5.5 (High)\n"
+        "gpt-oss-120b-medium\tGPT-OSS 120B (Medium)\n"
+        "bad id with space\tShould Skip\n"
+        "empty-name-model\t   \n"
+    )
+    parsed = ajan.parse_models_output(raw)
+    assert [m["id"] for m in parsed] == [
+        "gemini-4-neon-high",
+        "gemini-4-neon-xhigh",
+        "gemini-3.8-flash-high",
+        "claude-opus-5-5-high",
+        "gpt-oss-120b-medium",
+    ]
+    assert parsed[0] == {"id": "gemini-4-neon-high", "ad": "Gemini 4 Neon (High)"}
+    assert ajan.parse_models_output("") == []
+    assert ajan.parse_models_output("Fetching available models...\nno tabs\n") == []
+
+
+def test_build_aliases_ve_surum_siralamasi() -> None:
+    """
+    build_aliases aile/seviye takma adlarını üretmeli, orchestrator/Gemini dışı modelleri atlamalı,
+    aynı ailede sayısal sürüm karşılaştırmasıyla (4 > 3.8, 3.10 > 3.9) en yüksek sürümü seçmelidir.
+    """
+    models = [
+        {"id": "gemini-3.8-neon-low", "ad": "Old Neon Low"},
+        {"id": "gemini-3.8-neon-xhigh", "ad": "Old Neon XHigh"},
+        {"id": "gemini-4-neon-high", "ad": "Gemini 4 Neon (High)"},
+        {"id": "gemini-4-neon-xhigh", "ad": "Gemini 4 Neon (XHigh)"},
+        {"id": "gemini-4-neon-medium", "ad": "Gemini 4 Neon (Medium)"},
+        {"id": "gemini-4-neon-low", "ad": "Gemini 4 Neon (Low)"},
+        {"id": "gemini-3.8-flash-high", "ad": "Gemini 3.8 Flash (High)"},
+        {"id": "gemini-3.8-flash-medium", "ad": "Gemini 3.8 Flash (Medium)"},
+        {"id": "gemini-3.8-flash-low", "ad": "Gemini 3.8 Flash (Low)"},
+        {"id": "gemini-3.9-krypton-xhigh", "ad": "Krypton 3.9 XHigh"},
+        {"id": "gemini-3.9-krypton-low", "ad": "Krypton 3.9 Low"},
+        {"id": "gemini-3.10-krypton-high", "ad": "Krypton 3.10 High"},
+        {"id": "gemini-3.10-krypton-medium", "ad": "Krypton 3.10 Medium"},
+        {"id": "gemini-pro-orchestrator-neon", "ad": "Orchestrator (Neon)"},
+        {"id": "claude-opus-5-5-high", "ad": "Claude Opus 5.5 (High)"},
+    ]
+    fams = ajan.families(models)
+    assert fams["neon"]["surum"] == (4,)
+    assert fams["krypton"]["surum"] == (3, 10)
+    # 3.10 sürümü kazanınca 3.9'un xhigh/low seviyeleri karışmamalı
+    assert set(fams["krypton"]["seviyeler"].keys()) == {"high", "medium"}
+    assert "orchestrator" not in fams
+
+    aliases = ajan.build_aliases(models)
+    assert aliases["neon"] == "gemini-4-neon-xhigh"
+    assert aliases["neon-high"] == "gemini-4-neon-high"
+    assert aliases["neon-orta"] == "gemini-4-neon-medium"
+    assert aliases["neon-low"] == "gemini-4-neon-low"
+    assert aliases["flash"] == "gemini-3.8-flash-high"
+    assert aliases["flash-orta"] == "gemini-3.8-flash-medium"
+    assert aliases["flash-low"] == "gemini-3.8-flash-low"
+    assert aliases["krypton"] == "gemini-3.10-krypton-high"
+    assert aliases["krypton-high"] == "gemini-3.10-krypton-high"
+    assert aliases["krypton-orta"] == "gemini-3.10-krypton-medium"
+    assert "krypton-low" not in aliases
+    # orchestrator ve Gemini dışı modeller takma ad üretmez
+    assert all("orchestrator" not in k for k in aliases)
+    assert all("claude" not in k for k in aliases)
+
+
+def test_legacy_uyum_ve_dinamik_takma_adlar(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """
+    Eski sabit takma adlar (ör. argon -> gemini-4-argon-high) katalogda o seviye olmasa bile
+    korunmalı; yeni dinamik adlar (neon-low, krypton, argon-high, flash-low) çözülmelidir.
+    """
+    models_file = tmp_path / "models_dynamic.txt"
+    models_file.write_text(
+        "Fetching available models...\n"
+        "gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)\n"
+        "gemini-4-neon-low\tGemini 4 Neon (Low)\n"
+        "gemini-4-argon-medium\tGemini 4 Argon (Medium)\n"
+        "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n"
+        "gemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n"
+        "gemini-5-krypton-xhigh\tGemini 5 Krypton (XHigh)\n"
+        "gemini-5-krypton-medium\tGemini 5 Krypton (Medium)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FAKE_AGY_MODELS", str(models_file))
+    ajan._CATALOG_MEMO.clear()
+
+    # Katalogda yalnızca argon-medium olsa bile LEGACY önceliği korunur
+    assert resolve_model("argon") == "gemini-4-argon-high"
+    assert resolve_model("argon-orta") == "gemini-4-argon-medium"
+    assert resolve_model("flash-orta") == "gemini-3.8-flash-medium"
+    # Yeni dinamik takma adlar
+    assert resolve_model("neon-low") == "gemini-4-neon-low"
+    assert resolve_model("flash-low") == "gemini-3.8-flash-low"
+    assert resolve_model("krypton") == "gemini-5-krypton-xhigh"
+    assert resolve_model("krypton-orta") == "gemini-5-krypton-medium"
+    # Katalogda argon-high eklenirse dinamik olarak çözümlenir
+    models_file.write_text(
+        models_file.read_text(encoding="utf-8")
+        + "gemini-4-argon-high\tGemini 4 Argon (High)\n",
+        encoding="utf-8",
+    )
+    ajan.load_catalog(refresh=True)
+    assert resolve_model("argon-high") == "gemini-4-argon-high"
+
+
+def test_default_model_tercih_sirasi_ve_yedekler() -> None:
+    """
+    default_model tercih sırasını (neon -> hydrogen -> argon -> flash) izlemeli,
+    yeni aileyi varsayılan yapmamalı ve hiç Gemini yoksa DEFAULT_MODEL dönmelidir.
+    """
+    # 1. neon yoksa hydrogen
+    only_hydrogen_up = [
+        {"id": "gemini-4-hydrogen-xhigh", "ad": "Hydrogen XHigh"},
+        {"id": "gemini-4-argon-medium", "ad": "Argon Medium"},
+        {"id": "gemini-3.8-flash-high", "ad": "Flash High"},
+    ]
+    assert ajan.default_model(only_hydrogen_up) == "gemini-4-hydrogen-xhigh"
+
+    # 2. neon ve hydrogen yoksa argon (katalogda yalnız argon-medium varsa onu seçer)
+    only_argon_medium = [
+        {"id": "gemini-4-argon-medium", "ad": "Argon Medium"},
+        {"id": "gemini-3.8-flash-high", "ad": "Flash High"},
+    ]
+    assert ajan.default_model(only_argon_medium) == "gemini-4-argon-medium"
+
+    # argon-high katalogda varsa eski davranışla uyumlu argon-high seçer
+    argon_with_high = [
+        {"id": "gemini-4-argon-high", "ad": "Argon High"},
+        {"id": "gemini-4-argon-medium", "ad": "Argon Medium"},
+    ]
+    assert ajan.default_model(argon_with_high) == "gemini-4-argon-high"
+
+    # 3. hiç Gemini yoksa DEFAULT_MODEL
+    non_gemini_only = [
+        {"id": "claude-opus-5-5-high", "ad": "Claude Opus 5.5"},
+        {"id": "gpt-oss-120b-medium", "ad": "GPT-OSS 120B"},
+    ]
+    assert ajan.default_model(non_gemini_only) == DEFAULT_MODEL
+
+    # 4. yalnız yeni (tercih dışı) aile varsa varsayılan yapılmaz -> DEFAULT_MODEL
+    unknown_family_only = [
+        {"id": "gemini-5-krypton-xhigh", "ad": "Krypton XHigh"},
+    ]
+    assert ajan.default_model(unknown_family_only) == DEFAULT_MODEL
+
+
+def test_ajan_model_onceligi_ve_cli_model_ezer(
+    test_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    AJAN_MODEL ortam değişkeni takma ad veya tam kimlik olarak varsayılanı belirlemeli;
+    --model verildiğinde AJAN_MODEL yok sayılmalıdır.
+    """
+    # Birim düzeyinde AJAN_MODEL: takma ad, tam kimlik ve boş değer
+    monkeypatch.setenv("AJAN_MODEL", "hydrogen")
+    assert ajan.default_model() == "gemini-4-hydrogen-xhigh"
+    assert resolve_model(None) == "gemini-4-hydrogen-xhigh"
+    assert resolve_model("") == "gemini-4-hydrogen-xhigh"
+
+    monkeypatch.setenv("AJAN_MODEL", "claude-opus-5-5-high")
+    assert ajan.default_model() == "claude-opus-5-5-high"
+
+    monkeypatch.setenv("AJAN_MODEL", "   ")
+    assert ajan.default_model() == "gemini-4-neon-xhigh"
+    monkeypatch.delenv("AJAN_MODEL", raising=False)
+
+    # CLI düzeyinde: AJAN_MODEL=hydrogen iken --model olmadan başlatma
+    env = dict(test_env["env"], AJAN_MODEL="hydrogen")
+    log_path = test_env["log_path"]
+
+    res1 = run_ajan(["baslat", "env_model_g", "-m", "test1", "--bekle"], env=env)
+    assert res1.returncode == 0, res1.stderr
+
+    # CLI düzeyinde: --model flash-orta verildiğinde AJAN_MODEL ezilir
+    res2 = run_ajan(
+        [
+            "baslat",
+            "cli_model_g",
+            "-m",
+            "test2",
+            "--model",
+            "flash-orta",
+            "--bekle",
+        ],
+        env=env,
+    )
+    assert res2.returncode == 0, res2.stderr
+
+    calls = [
+        json.loads(line)
+        for line in open(log_path, encoding="utf-8")
+        if line.strip()
+    ]
+    assert len(calls) == 2
+
+    argv1 = calls[0]["argv"]
+    assert argv1[argv1.index("--model") + 1] == "gemini-4-hydrogen-xhigh"
+
+    argv2 = calls[1]["argv"]
+    assert argv2[argv2.index("--model") + 1] == "gemini-3.8-flash-medium"
+
+    # meta.model verilmediğinde durum '-' göstermeli
+    res_durum = run_ajan(["durum", "env_model_g", "--json"], env=env)
+    assert res_durum.returncode == 0
+    assert json.loads(res_durum.stdout)["model"] == "-"
+
+
+def test_katalog_onbellek_ttl_ve_cagri_sayisi(test_env: dict[str, Any]) -> None:
+    """
+    Taze önbellek varken agy models tekrar çağrılmamalı;
+    fetched_at TTL'den eski olduğunda yeniden agy models çağrılmalıdır.
+    """
+    env = dict(test_env["env"])
+    state_dir = test_env["state_dir"]
+    models_log = test_env["models_log_path"]
+
+    def count_model_calls() -> int:
+        if not os.path.isfile(models_log):
+            return 0
+        with open(models_log, "r", encoding="utf-8") as f:
+            return len([ln for ln in f if ln.strip()])
+
+    # 1. İlk çağrı agy models'i 1 kez çalıştırır ve önbelleği yazar
+    res1 = run_ajan(["baslat", "ttl_gorev", "-m", "1. tur", "--bekle"], env=env)
+    assert res1.returncode == 0, res1.stderr
+    assert count_model_calls() == 1
+    cache_file = state_dir / "models_cache.json"
+    assert cache_file.is_file()
+
+    # 2. Taze önbellek varken devam ve modeller komutları agy models çağırmaz
+    res2 = run_ajan(["devam", "ttl_gorev", "-m", "2. tur", "--bekle"], env=env)
+    assert res2.returncode == 0, res2.stderr
+    res3 = run_ajan(["modeller", "--json"], env=env)
+    assert res3.returncode == 0
+    assert json.loads(res3.stdout)["kaynak"] == "onbellek"
+    assert count_model_calls() == 1
+
+    # 3. Önbelleği bayatlat (25 saat geriye çek) -> tekrar agy çağrılır
+    cache_data = json.loads(cache_file.read_text(encoding="utf-8"))
+    cache_data["fetched_at"] = time.time() - (25 * 3600)
+    cache_file.write_text(json.dumps(cache_data), encoding="utf-8")
+
+    res4 = run_ajan(["modeller", "--json"], env=env)
+    assert res4.returncode == 0
+    assert json.loads(res4.stdout)["kaynak"] == "agy"
+    assert count_model_calls() == 2
+
+
+def test_katalog_agy_hatasi_zaman_asimi_ve_bozuk_onbellek(
+    test_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """
+    agy hata/zaman aşımında varsa bayat önbelleğe, yoksa BUILTIN_MODELS'e düşmeli;
+    bozuk önbellek JSON'u yok sayılmalı ve agy models hatasında görev yine başlamalıdır.
+    """
+    state_dir = test_env["state_dir"]
+    cache_file = state_dir / "models_cache.json"
+
+    # 1. Önbellek yokken agy models başarısız -> yerleşik liste + görev yine başlar
+    env_fail = dict(test_env["env"], FAKE_AGY_MODELS_FAIL="1")
+    res_m = run_ajan(["modeller", "--json"], env=env_fail)
+    assert res_m.returncode == 0
+    data_builtin = json.loads(res_m.stdout)
+    assert data_builtin["kaynak"] == "yerlesik"
+    assert data_builtin["varsayilan"] == DEFAULT_MODEL
+    assert not cache_file.exists()
+
+    res_task = run_ajan(
+        ["baslat", "fail_models_gorev", "-m", "yerleşik ile başla", "--bekle"],
+        env=env_fail,
+    )
+    assert res_task.returncode == 0, res_task.stderr
+
+    # 2. Bayat önbellek varken agy başarısız -> bayat önbelleğe düşer ve dosyaya dokunmaz
+    stale_ts = time.time() - (48 * 3600)
+    stale_payload = {
+        "fetched_at": stale_ts,
+        "models": [
+            {"id": "gemini-4-hydrogen-xhigh", "ad": "Stale Hydrogen XHigh"},
+        ],
+    }
+    cache_file.write_text(json.dumps(stale_payload), encoding="utf-8")
+    res_stale = run_ajan(["modeller", "--json"], env=env_fail)
+    assert res_stale.returncode == 0
+    data_stale = json.loads(res_stale.stdout)
+    assert data_stale["kaynak"] == "onbellek"
+    assert data_stale["varsayilan"] == "gemini-4-hydrogen-xhigh"
+    assert json.loads(cache_file.read_text(encoding="utf-8"))["fetched_at"] == stale_ts
+
+    # 3. Bozuk önbellek JSON'u -> önbellek yok sayılır
+    cache_file.write_text("{bozuk json!!!", encoding="utf-8")
+    res_corrupt_fail = run_ajan(["modeller", "--json"], env=env_fail)
+    assert res_corrupt_fail.returncode == 0
+    assert json.loads(res_corrupt_fail.stdout)["kaynak"] == "yerlesik"
+
+    # agy çalışınca bozuk önbelleğin üzerine geçerli önbellek yazar
+    res_corrupt_ok = run_ajan(["modeller", "--json"], env=test_env["env"])
+    assert res_corrupt_ok.returncode == 0
+    assert json.loads(res_corrupt_ok.stdout)["kaynak"] == "agy"
+    assert isinstance(json.loads(cache_file.read_text(encoding="utf-8")), dict)
+
+    # 4. subprocess.TimeoutExpired exception sızdırmadan yerleşik listeye düşer
+    timeout_state = tmp_path / "timeout_state"
+    timeout_state.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("AJAN_DIZIN", str(timeout_state))
+    ajan._CATALOG_MEMO.clear()
+
+    def fake_run_timeout(*a: Any, **kw: Any) -> Any:
+        raise subprocess.TimeoutExpired(cmd=["agy", "models"], timeout=20)
+
+    monkeypatch.setattr(subprocess, "run", fake_run_timeout)
+    cat = ajan.load_catalog(refresh=True)
+    assert cat["kaynak"] == "yerlesik"
+    assert len(cat["models"]) == len(ajan.BUILTIN_MODELS)
+    monkeypatch.undo()
+
+    # 5. Önbellek yazılamazsa (OSError) sessizce devam eder ve agy sonucunu döner
+    blocker = tmp_path / "dosya_engel_cache"
+    blocker.write_text("engel", encoding="utf-8")
+    monkeypatch.setenv("AJAN_DIZIN", str(blocker / "alt"))
+    monkeypatch.setenv("AJAN_AGY", test_env["env"]["AJAN_AGY"])
+    ajan._CATALOG_MEMO.clear()
+    cat_unwritable = ajan.load_catalog(refresh=True)
+    assert cat_unwritable["kaynak"] == "agy"
+    assert len(cat_unwritable["models"]) == 10
+
+
+def test_yeni_aile_bildirimi(test_env: dict[str, Any], tmp_path: Any) -> None:
+    """
+    İlk önbellek oluşturmada sessiz olmalı; sonraki yenilemede yeni Gemini ailesi (krypton)
+    gelince stderr'e tek satır bildirmeli, varsayılanı değiştirmemeli ve ikinci yenilemede tekrarlamamalıdır.
+    """
+    base_models = tmp_path / "models_base.txt"
+    base_models.write_text(DEFAULT_FAKE_MODELS_OUTPUT, encoding="utf-8")
+
+    env = dict(test_env["env"], FAKE_AGY_MODELS=str(base_models))
+
+    # 1. İlk önbellek oluşumu: stderr sessiz
+    res_init = run_ajan(["modeller", "--json"], env=env)
+    assert res_init.returncode == 0
+    assert res_init.stderr.strip() == ""
+
+    # 2. Katalogda krypton belirir -> yenilemede stderr'de tek satır bildirim
+    with_krypton = tmp_path / "models_krypton.txt"
+    with_krypton.write_text(
+        DEFAULT_FAKE_MODELS_OUTPUT
+        + "gemini-5-krypton-xhigh\tGemini 5 Krypton (XHigh)\n"
+        + "gemini-5-krypton-medium\tGemini 5 Krypton (Medium)\n",
+        encoding="utf-8",
+    )
+    env_k = dict(test_env["env"], FAKE_AGY_MODELS=str(with_krypton))
+
+    res_new = run_ajan(["modeller", "--yenile", "--json"], env=env_k)
+    assert res_new.returncode == 0
+    err_lines = [ln for ln in res_new.stderr.splitlines() if ln.strip()]
+    assert len(err_lines) == 1
+    assert "krypton" in err_lines[0]
+    assert "AJAN_MODEL=krypton" in err_lines[0]
+    assert "--model krypton" in err_lines[0]
+
+    # Yeni aile varsayılan yapılmamalı
+    data_k = json.loads(res_new.stdout)
+    assert data_k["varsayilan"] == "gemini-4-neon-xhigh"
+    assert data_k["takma_adlar"]["krypton"] == "gemini-5-krypton-xhigh"
+
+    # 3. İkinci yenilemede tekrar bildirilmez
+    res_again = run_ajan(["modeller", "--yenile", "--json"], env=env_k)
+    assert res_again.returncode == 0
+    assert res_again.stderr.strip() == ""
+
+    # 4. Birden çok yeni aile (EN dilinde) virgülle birleştirilmiş tek satır
+    with_two = tmp_path / "models_two_new.txt"
+    with_two.write_text(
+        with_krypton.read_text(encoding="utf-8")
+        + "gemini-5-xenon-high\tGemini 5 Xenon (High)\n"
+        + "gemini-5-radon-high\tGemini 5 Radon (High)\n",
+        encoding="utf-8",
+    )
+    env_two_en = dict(
+        test_env["env"], FAKE_AGY_MODELS=str(with_two), AJAN_DIL="en"
+    )
+    res_two = run_ajan(["models", "--refresh", "--json"], env=env_two_en)
+    assert res_two.returncode == 0
+    err_two_lines = [ln for ln in res_two.stderr.splitlines() if ln.strip()]
+    assert len(err_two_lines) == 1
+    assert "xenon, radon" in err_two_lines[0]
+    assert "AJAN_MODEL=xenon" in err_two_lines[0]
+
+
+def test_modeller_komutu_json_metin_ve_alias(test_env: dict[str, Any]) -> None:
+    """
+    modeller --json, modeller metin çıktısı ve models --refresh alias'ının
+    beklenen alanları ve okunabilir biçimi ürettiğini doğrular.
+    """
+    env = dict(test_env["env"])
+
+    # 1. modeller --json
+    res_json = run_ajan(["modeller", "--json"], env=env)
+    assert res_json.returncode == 0, res_json.stderr
+    data = json.loads(res_json.stdout)
+    assert data["kaynak"] == "agy"
+    assert data["varsayilan"] == "gemini-4-neon-xhigh"
+    assert data["varsayilan_aile"] == "neon"
+    assert data["takma_adlar"]["neon"] == "gemini-4-neon-xhigh"
+    assert data["takma_adlar"]["neon-low"] == "gemini-4-neon-low"
+    assert data["aileler"]["neon"]["surum"] == "4"
+    assert data["aileler"]["flash"]["surum"] == "3.8"
+    assert data["aileler"]["neon"]["seviyeler"]["xhigh"] == "gemini-4-neon-xhigh"
+    assert isinstance(data["modeller"], list) and len(data["modeller"]) == 10
+
+    # 2. modeller metin çıktısı (önbellekten)
+    res_txt = run_ajan(["modeller"], env=env)
+    assert res_txt.returncode == 0, res_txt.stderr
+    assert "önbellek" in res_txt.stdout
+    assert "neon" in res_txt.stdout
+    assert "*" in res_txt.stdout
+    assert "(varsayılan)" in res_txt.stdout
+    assert "gemini-pro-orchestrator-neon" in res_txt.stdout
+    assert "Gemini dışı modeller" in res_txt.stdout
+    assert "claude-opus-5-5-high" in res_txt.stdout
+
+    # 3. İngilizce alias: models --refresh (AJAN_DIL=en)
+    env_en = dict(env, AJAN_DIL="en")
+    res_en = run_ajan(["models", "--refresh"], env=env_en)
+    assert res_en.returncode == 0, res_en.stderr
+    assert "Source: agy" in res_en.stdout
+    assert "(default)" in res_en.stdout
+    assert "Non-Gemini models" in res_en.stdout
+
+
+def test_gecersiz_model_ipucu_baton_modeller_icerir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Geçersiz model ipucu hem TR hem EN çıktısında 'baton modeller' içermelidir."""
+    monkeypatch.setenv("AJAN_DIL", "tr")
+    assert "baton modeller" in ajan.tr("hint_invalid_model")
+    monkeypatch.setenv("AJAN_DIL", "en")
+    assert "baton modeller" in ajan.tr("hint_invalid_model")
+
+
 

@@ -23,7 +23,7 @@ Sen ─▶ Claude Code            planlar, görev dosyasını yazar, senin testl
 - **Dar yazma izni.** Gemini yalnız `--yaz` ile verilen dizinlere yazabilir. Eksik izin kuralı olursa görev, token harcanmadan çıkış 2 ile durur.
 - **Varsayılan sandbox.** `--komut` verilmezse terminal kapalıdır (`--sandbox`).
 - **Claude bağlamını şişirmez.** `rapor` kısa bir özet basar; isteğe bağlı alt ajan döngünün tamamını ana oturumun dışında tutar.
-- **Sıfır bağımlılık.** Tek Python 3.10+ dosyası, yalnız standart kütüphane. 42 test sahte bir `agy` ile çalışır.
+- **Sıfır bağımlılık.** Tek Python 3.10+ dosyası, yalnız standart kütüphane. 60 test sahte bir `agy` ile çalışır.
 
 ## Gereksinimler
 
@@ -104,19 +104,21 @@ Uzun işlerde bağlamı Markdown dosyalarına yazıp `-g` ile ver (`-g A -g B` v
 | `iptal <etiket>` | çalışan görevi durdurur: SIGTERM, 5 sn sonra SIGKILL (çalışmıyorsa çıkış 1) |
 | `temizle` | `--gun GÜN` (varsayılan 7) |
 | `izin kontrol` | `--yaz`, `--komut`, `--izin-ekle` |
+| `modeller` (`models`) | `--yenile` (`--refresh`), `--json` |
 
 Görev etiketleri (`<etiket>`) yalnız `[A-Za-z0-9._-]` karakterlerinden oluşabilir ve 1–64 karakter uzunluğunda olmalıdır.
 
-Model takma adları: `neon` → `gemini-4-neon-xhigh` (varsayılan), `neon-high`, `neon-orta`, `hydrogen` → `gemini-4-hydrogen-xhigh`, `hydrogen-high`, `hydrogen-orta`, `flash` → `gemini-3.8-flash-high`, `flash-orta` → `gemini-3.8-flash-medium`, `argon` → `gemini-4-argon-high`, `argon-orta` → `gemini-4-argon-medium`. İstersen tam model kimliğini de verebilirsin.
+Model takma adları `agy models` kataloğundan dinamik olarak türetilir (`<aile>`, `<aile>-high`, `<aile>-orta`, `<aile>-low`; tam model kimliği de verilebilir). Varsayılan model otomatik belirlenir: hesapta mevcut olan ilk aile tercih sırasıyla (`neon` → `hydrogen` → `argon` → `flash`) seçilir; `AJAN_MODEL` ya da `--model` ile değiştirilebilir. Kullanılabilir aileleri ve takma adları görmek için `baton modeller` çalıştırılır. Katalog 24 saat önbelleklenir; yenilemede yeni bir Gemini ailesi görülürse stderr'e tek satır bilgi yazılır.
 
 ## Yapılandırma
 
 | Değişken | Varsayılan | Amaç |
 |---|---|---|
-| `AJAN_DIL` | `tr` | İleti ve istem dili: `tr` ya da `en` |
+| `AJAN_DIL` | `tr` | `--help`, ileti ve istem dili: `tr` ya da `en` |
 | `AJAN_AGY` | `agy` | `agy` ikilisinin yolu |
 | `AJAN_DIZIN` | `$XDG_STATE_HOME/ajan` ya da `~/.local/state/ajan` | Görev durum dizini |
 | `AJAN_AYAR` | `~/.gemini/antigravity-cli/settings.json` | agy izin dosyası |
+| `AJAN_MODEL` | otomatik | Varsayılan model takma adı ya da tam kimlik (`--model` bunu ezer) |
 
 ## İzinler
 
@@ -138,7 +140,7 @@ Model takma adları: `neon` → `gemini-4-neon-xhigh` (varsayılan), `neon-high`
 ## Sınırlamalar
 
 - Yerelde kurulu ve oturumu açık bir `agy` gerekir. Görevler aynı makinede çalışır; uzak makinede çalıştırma desteği yok.
-- `--help` ve bazı çıktılar `AJAN_DIL=en` olsa da Türkçe kalır.
+- Komut adları Türkçedir (`start`, `wait`, `report` gibi İngilizce takma adlar da çalışır). `AJAN_DIL=en` ile `--help`, durum iletileri ve görev istemleri İngilizce olur; `agy` çıktısı ve görev içeriği olduğu gibi kalır.
 - `durum` çıktısındaki token sayısı girdi ve çıktıyı kapsar; cache okumaları görünmez.
 - Anthropic ya da Google ile bağlantılı değildir.
 

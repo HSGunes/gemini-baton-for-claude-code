@@ -20,8 +20,13 @@ import threading
 import time
 from typing import Any
 
-# Model Takma Adları
-MODEL_ALIASES: dict[str, str] = {
+# Kalite sırası elle belirlenir, isimden tahmin edilmez.
+PREFERRED_FAMILIES: list[str] = ["neon", "hydrogen", "argon", "flash"]
+
+LEVEL_ORDER: tuple[str, ...] = ("xhigh", "high", "medium", "low")
+
+# Geriye dönük uyum için eski sabit takma adlar
+LEGACY_ALIASES: dict[str, str] = {
     "flash": "gemini-3.8-flash-high",
     "flash-orta": "gemini-3.8-flash-medium",
     "argon": "gemini-4-argon-high",
@@ -34,7 +39,35 @@ MODEL_ALIASES: dict[str, str] = {
     "hydrogen-orta": "gemini-4-hydrogen-medium",
 }
 
+MODEL_ALIASES: dict[str, str] = dict(LEGACY_ALIASES)
+
 DEFAULT_MODEL = "gemini-4-neon-xhigh"
+
+BUILTIN_MODELS: list[dict[str, str]] = [
+    {"id": "gemini-4-neon-xhigh", "ad": "Gemini 4 Neon (XHigh)"},
+    {"id": "gemini-4-neon-high", "ad": "Gemini 4 Neon (High)"},
+    {"id": "gemini-4-neon-medium", "ad": "Gemini 4 Neon (Medium)"},
+    {"id": "gemini-4-neon-low", "ad": "Gemini 4 Neon (Low)"},
+    {"id": "gemini-4-hydrogen-xhigh", "ad": "Gemini 4 Hydrogen (XHigh)"},
+    {"id": "gemini-4-hydrogen-high", "ad": "Gemini 4 Hydrogen (High)"},
+    {"id": "gemini-4-hydrogen-medium", "ad": "Gemini 4 Hydrogen (Medium)"},
+    {"id": "gemini-4-argon-high", "ad": "Gemini 4 Argon (High)"},
+    {"id": "gemini-4-argon-medium", "ad": "Gemini 4 Argon (Medium)"},
+    {"id": "gemini-3.8-flash-high", "ad": "Gemini 3.8 Flash (High)"},
+    {"id": "gemini-3.8-flash-medium", "ad": "Gemini 3.8 Flash (Medium)"},
+    {"id": "gemini-pro-orchestrator-neon", "ad": "Orchestrator (Neon)"},
+]
+
+MODELS_CACHE_FILENAME = "models_cache.json"
+MODELS_CACHE_TTL = 24 * 3600
+_CATALOG_MEMO_TTL = 60.0
+_CATALOG_MEMO: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+
+MODEL_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+GEMINI_MODEL_RE = re.compile(
+    r"^gemini-(\d+(?:\.\d+)*)-([a-z][a-z0-9]*)-(xhigh|high|medium|low)$"
+)
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 ETIKET_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
@@ -60,6 +93,8 @@ def get_lang() -> str:
 MESSAGES: dict[str, dict[str, Any]] = {
     "tr": {
         "err_task_file_not_found": "Hata: Görev dosyası bulunamadı: {fpath}",
+        "err_task_file_unreadable": "Hata: Görev dosyası okunamadı: {fpath} ({err})",
+        "err_agy_not_found": "Hata: agy bulunamadı: {agy}. Antigravity CLI kurulu mu / PATH'te mi? Alternatif: AJAN_AGY ortam değişkeni.",
         "err_task_input_required": "Hata: Görev için -g/--gorev-dosyalari veya -m/--mesaj gereklidir.",
         "err_task_running": "Hata: '{etiket}' etiketli görev şu anda canlı çalışıyor (PID: {pid}).",
         "err_task_not_running": "Hata: '{etiket}' etiketli görev çalışmıyor (durum: {durum}).",
@@ -88,6 +123,9 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "err_report_read": "Hata: Rapor dosyası okunamadı: {err}",
         "err_cwd_not_found": "Hata: Çalışma dizini bulunamadı: {cwd}",
         "err_settings_parse": "Hata: {path} geçerli JSON değil, dokunulmadı ({err}). Dosyayı düzeltip tekrar deneyin.",
+        "err_settings_write": "Hata: {path} yazılamadı ({err}).",
+        "verify_timeout": "Zaman aşımı ({timeout}s) aşıldı.",
+        "err_verify_cmd_exec": "Komut çalıştırılamadı: {err}",
         "watching_events": "[{etiket}] Olay akışı izleniyor (Çıkmak için Ctrl+C)...",
         "watching_stopped": "\nİzleme durduruldu.",
         "event_file_not_found": "Olay dosyası bulunamadı.",
@@ -99,7 +137,18 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "report_tests": "\nÇalıştırılan Testler / Komutlar:",
         "report_open_issues": "\nAçık Konular:",
         "report_error": "\nHata:\n  {err}",
-        "hint_invalid_model": "Kullanılabilir modelleri görmek için: agy models; farklı model için --model",
+        "hint_invalid_model": "Kullanılabilir modelleri görmek için: agy models; farklı model için --model (katalog ve takma adlar: baton modeller)",
+        "hint_new_family": "Yeni Gemini ailesi: {aile}. Denemek için: --model {aile} ya da AJAN_MODEL={aile}",
+        "hint_new_families": "Yeni Gemini aileleri: {aileler}. Denemek için: --model {ornek} ya da AJAN_MODEL={ornek}",
+        "models_source_agy": "agy",
+        "models_source_onbellek": "önbellek",
+        "models_source_yerlesik": "yerleşik",
+        "models_header": "Kaynak: {kaynak} ({adet} model) | Varsayılan: {varsayilan}",
+        "models_gemini_families": "Gemini aileleri:",
+        "models_default_tag": "(varsayılan)",
+        "models_other_gemini": "Diğer Gemini modelleri (tam kimlikle kullanılır):",
+        "models_non_gemini": "Gemini dışı modeller ({adet}; tam kimlikle kullanılır):",
+        "models_none_gemini": "  (Yok)",
         "none_item": "  - Yok",
         "yes": "Evet",
         "no": "Hayır",
@@ -120,9 +169,50 @@ MESSAGES: dict[str, dict[str, Any]] = {
             "DOSYA",
             "TOKEN",
         ],
+        "help_desc": "ajan - Gemini (agy CLI) alt ajan yöneticisi",
+        "help_cmd_baslat": "Yeni bir ajan görevi başlat",
+        "help_cmd_devam": "Mevcut göreve yeni turla devam et",
+        "help_cmd_durum": "Görev durumlarını görüntüle",
+        "help_cmd_bekle": "Görevlerin bitmesini bekle",
+        "help_cmd_rapor": "Görev raporunu veya ham yanıtı göster",
+        "help_cmd_izle": "Görev olay akışını canlı takip et",
+        "help_cmd_iptal": "Çalışan bir görevi iptal et",
+        "help_cmd_temizle": "Eski görevleri temizle",
+        "help_cmd_izin": "İzin yönetimi",
+        "help_cmd_izin_kontrol": "İzinleri denetle",
+        "help_cmd_dogrula": "Otomatik test ve düzeltme döngüsü ile görevi doğrula",
+        "help_cmd_modeller": "Kullanılabilir modelleri ve takma adları listele",
+        "help_arg_etiket": "Görev etiketi",
+        "help_arg_gorev_dosyalari": "Görev metnini içeren dosyalar",
+        "help_arg_mesaj": "Görev metni",
+        "help_arg_model": "Model: takma ad (ör. neon, hydrogen, flash-orta; liste: baton modeller) veya tam kimlik. Varsayılan: otomatik",
+        "help_arg_yenile": "Model önbelleğini yok sayarak agy üzerinden zorla yenile",
+        "help_arg_effort": "Düşünme eforu",
+        "help_arg_yaz": "Yazma izni verilecek dizin (--add-dir eklenir)",
+        "help_arg_oku": "Okuma izni verilecek dizin (--add-dir eklenir)",
+        "help_arg_komut": "Çalıştırılabilecek komut öneki",
+        "help_arg_sure": "Maksimum süre (ör. 30m, 1h, 1800s)",
+        "help_arg_sandbox": "Sandbox modunu etkinleştir",
+        "help_arg_izin_ekle": "Eksik izinleri settings.json'a otomatik ekle",
+        "help_arg_bekle": "Görev bitene kadar bekle",
+        "help_arg_takip_mesaj": "Takip mesajı",
+        "help_arg_json": "JSON formatında çıktı ver",
+        "help_arg_etiketler": "Beklenecek görev etiketleri",
+        "help_arg_zaman_asimi": "Zaman aşımı süresi (saniye)",
+        "help_arg_ham": "Ham yanıtı (yanit.md) göster",
+        "help_arg_gun": "Kaç günden eski görevlerin temizleneceği (varsayılan: 7)",
+        "help_arg_izin_yaz": "Yazma izni dizini",
+        "help_arg_izin_komut": "Komut öneki",
+        "help_arg_izin_ekle_kisa": "Eksik izinleri otomatik ekle",
+        "help_arg_test": "Çalıştırılacak doğrulama komutu",
+        "help_arg_tur": "Maksimum düzeltme turu sayısı; test en fazla N+1 kez çalıştırılır (varsayılan: 3)",
+        "help_arg_cwd": "Komutun çalıştırılacağı dizin",
+        "help_arg_dogrula_zaman_asimi": "Komut zaman aşımı süresi (saniye)",
     },
     "en": {
         "err_task_file_not_found": "Error: Task file not found: {fpath}",
+        "err_task_file_unreadable": "Error: Could not read task file: {fpath} ({err})",
+        "err_agy_not_found": "Error: agy not found: {agy}. Is Antigravity CLI installed and in PATH? Alternative: AJAN_AGY environment variable.",
         "err_task_input_required": "Error: Either -g/--gorev-dosyalari or -m/--mesaj is required for task.",
         "err_task_running": "Error: Task '{etiket}' is currently running (PID: {pid}).",
         "err_task_not_running": "Error: Task '{etiket}' is not running (status: {durum}).",
@@ -151,6 +241,9 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "err_report_read": "Error: Could not read report file: {err}",
         "err_cwd_not_found": "Error: Working directory not found: {cwd}",
         "err_settings_parse": "Error: {path} is not valid JSON; left untouched ({err}). Fix the file and retry.",
+        "err_settings_write": "Error: Could not write {path} ({err}).",
+        "verify_timeout": "Timeout ({timeout}s) exceeded.",
+        "err_verify_cmd_exec": "Failed to run command: {err}",
         "watching_events": "[{etiket}] Watching event stream (Ctrl+C to exit)...",
         "watching_stopped": "\nWatching stopped.",
         "event_file_not_found": "Event file not found.",
@@ -162,7 +255,18 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "report_tests": "\nExecuted Tests / Commands:",
         "report_open_issues": "\nOpen Issues:",
         "report_error": "\nError:\n  {err}",
-        "hint_invalid_model": "Run 'agy models' to list available models; choose one with --model",
+        "hint_invalid_model": "Run 'agy models' to list available models; choose one with --model (or 'baton modeller' / 'baton models')",
+        "hint_new_family": "New Gemini family: {aile}. Try with: --model {aile} or AJAN_MODEL={aile}",
+        "hint_new_families": "New Gemini families: {aileler}. Try with: --model {ornek} or AJAN_MODEL={ornek}",
+        "models_source_agy": "agy",
+        "models_source_onbellek": "cache",
+        "models_source_yerlesik": "builtin",
+        "models_header": "Source: {kaynak} ({adet} models) | Default: {varsayilan}",
+        "models_gemini_families": "Gemini families:",
+        "models_default_tag": "(default)",
+        "models_other_gemini": "Other Gemini models (use full ID):",
+        "models_non_gemini": "Non-Gemini models ({adet}; use full ID):",
+        "models_none_gemini": "  (None)",
         "none_item": "  - None",
         "yes": "Yes",
         "no": "No",
@@ -183,6 +287,45 @@ MESSAGES: dict[str, dict[str, Any]] = {
             "FILES",
             "TOKENS",
         ],
+        "help_desc": "ajan - Gemini (agy CLI) sub-agent manager",
+        "help_cmd_baslat": "Start a new agent task",
+        "help_cmd_devam": "Continue an existing task with a new round",
+        "help_cmd_durum": "Show task statuses",
+        "help_cmd_bekle": "Wait for tasks to finish",
+        "help_cmd_rapor": "Show task report or raw response",
+        "help_cmd_izle": "Stream task events live",
+        "help_cmd_iptal": "Cancel a running task",
+        "help_cmd_temizle": "Clean up old tasks",
+        "help_cmd_izin": "Permission management",
+        "help_cmd_izin_kontrol": "Check permissions",
+        "help_cmd_dogrula": "Verify a task with an automated test-and-fix loop",
+        "help_cmd_modeller": "List available models and aliases",
+        "help_arg_etiket": "Task tag",
+        "help_arg_gorev_dosyalari": "Files containing the task description",
+        "help_arg_mesaj": "Task description text",
+        "help_arg_model": "Model: alias (e.g. neon, hydrogen, flash-orta; list: baton models) or full ID. Default: automatic",
+        "help_arg_yenile": "Bypass cache and force refresh from agy",
+        "help_arg_effort": "Thinking effort level",
+        "help_arg_yaz": "Directory with write permission (added via --add-dir)",
+        "help_arg_oku": "Directory with read permission (added via --add-dir)",
+        "help_arg_komut": "Allowed command prefix",
+        "help_arg_sure": "Maximum duration (e.g. 30m, 1h, 1800s)",
+        "help_arg_sandbox": "Enable sandbox mode",
+        "help_arg_izin_ekle": "Automatically add missing permissions to settings.json",
+        "help_arg_bekle": "Wait until the task finishes",
+        "help_arg_takip_mesaj": "Follow-up message",
+        "help_arg_json": "Output in JSON format",
+        "help_arg_etiketler": "Task tags to wait for",
+        "help_arg_zaman_asimi": "Timeout duration (seconds)",
+        "help_arg_ham": "Show raw response (yanit.md)",
+        "help_arg_gun": "Remove tasks older than this many days (default: 7)",
+        "help_arg_izin_yaz": "Write permission directory",
+        "help_arg_izin_komut": "Command prefix",
+        "help_arg_izin_ekle_kisa": "Automatically add missing permissions",
+        "help_arg_test": "Verification command to run",
+        "help_arg_tur": "Maximum fix rounds; test runs at most N+1 times (default: 3)",
+        "help_arg_cwd": "Working directory for the command",
+        "help_arg_dogrula_zaman_asimi": "Command timeout duration (seconds)",
     },
 }
 
@@ -225,11 +368,304 @@ def get_agy_binary() -> str:
     return os.environ.get("AJAN_AGY", "agy")
 
 
+def _atomic_write_json(target_dir: str, filename: str, data: Any) -> None:
+    """JSON verisini benzersiz geçici dosya üzerinden atomik olarak yazar."""
+    os.makedirs(target_dir, exist_ok=True)
+    target_path = os.path.join(target_dir, filename)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=f"{filename}.{os.getpid()}.", suffix=".tmp", dir=target_dir
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, target_path)
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def parse_models_output(text: str) -> list[dict[str, str]]:
+    """`agy models` çıktısını (kimlik<TAB>ad) ayrıştırır; sırayı korur, tekrarları atar."""
+    seen: set[str] = set()
+    result: list[dict[str, str]] = []
+    for raw_line in (text or "").splitlines():
+        clean_line = _ANSI_ESCAPE_RE.sub("", raw_line)
+        if "\t" not in clean_line:
+            continue
+        raw_id, raw_ad = clean_line.split("\t", 1)
+        model_id = raw_id.strip()
+        model_ad = raw_ad.strip()
+        if (
+            not model_id
+            or not model_ad
+            or not MODEL_ID_RE.fullmatch(model_id)
+            or not any(ch.isalpha() for ch in model_id)
+        ):
+            continue
+        if model_id in seen:
+            continue
+        seen.add(model_id)
+        result.append({"id": model_id, "ad": model_ad})
+    return result
+
+
+def fetch_models_from_agy(timeout: float = 20) -> list[dict[str, str]] | None:
+    """`agy models` komutunu çalıştırıp model listesini döner; herhangi bir hatada None."""
+    try:
+        proc = subprocess.run(
+            [get_agy_binary(), "models"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    combined = "\n".join(part for part in (proc.stdout, proc.stderr) if part)
+    models = parse_models_output(combined)
+    return models if models else None
+
+
+def _parse_version_tuple(version_str: str) -> tuple[int, ...]:
+    """Sürüm dizesini sayısal karşılaştırma için tamsayı demetine çevirir."""
+    return tuple(int(part) for part in version_str.split("."))
+
+
+def families(models: list[dict[str, str]]) -> dict[str, dict[str, Any]]:
+    """Gemini modellerini ailelere gruplar; aynı ailede en yüksek sürüm kazanır."""
+    grouped: dict[str, dict[tuple[int, ...], dict[str, str]]] = {}
+    for item in models:
+        mid = item.get("id", "") if isinstance(item, dict) else ""
+        match = GEMINI_MODEL_RE.fullmatch(mid)
+        if not match:
+            continue
+        ver_str, aile, seviye = match.groups()
+        ver_tuple = _parse_version_tuple(ver_str)
+        by_ver = grouped.setdefault(aile, {})
+        levels = by_ver.setdefault(ver_tuple, {})
+        if seviye not in levels:
+            levels[seviye] = mid
+
+    result: dict[str, dict[str, Any]] = {}
+    for aile, by_ver in grouped.items():
+        best_ver = max(by_ver.keys())
+        best_levels = by_ver[best_ver]
+        ordered_levels = {
+            lvl: best_levels[lvl] for lvl in LEVEL_ORDER if lvl in best_levels
+        }
+        result[aile] = {"surum": best_ver, "seviyeler": ordered_levels}
+    return result
+
+
+def build_aliases(models: list[dict[str, str]]) -> dict[str, str]:
+    """Katalogdaki Gemini ailelerinden dinamik takma ad sözlüğü üretir."""
+    aliases: dict[str, str] = {}
+    for aile, info in families(models).items():
+        seviyeler: dict[str, str] = info["seviyeler"]
+        for lvl in LEVEL_ORDER:
+            if lvl in seviyeler:
+                aliases[aile] = seviyeler[lvl]
+                break
+        if "high" in seviyeler:
+            aliases[f"{aile}-high"] = seviyeler["high"]
+        if "medium" in seviyeler:
+            aliases[f"{aile}-orta"] = seviyeler["medium"]
+        if "low" in seviyeler:
+            aliases[f"{aile}-low"] = seviyeler["low"]
+    return aliases
+
+
+def _read_models_cache(cache_path: str) -> dict[str, Any] | None:
+    """Önbellek dosyasını okur; yoksa veya bozuksa None döner."""
+    if not os.path.isfile(cache_path):
+        return None
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    fetched_at = data.get("fetched_at")
+    raw_models = data.get("models")
+    if (
+        isinstance(fetched_at, bool)
+        or not isinstance(fetched_at, (int, float))
+        or not isinstance(raw_models, list)
+        or not raw_models
+    ):
+        return None
+    cleaned: list[dict[str, str]] = []
+    for item in raw_models:
+        if (
+            isinstance(item, dict)
+            and isinstance(item.get("id"), str)
+            and item["id"].strip()
+            and isinstance(item.get("ad"), str)
+        ):
+            cleaned.append({"id": item["id"], "ad": item["ad"]})
+    if not cleaned:
+        return None
+    return {"fetched_at": float(fetched_at), "models": cleaned}
+
+
+def load_catalog(refresh: bool = False) -> dict[str, Any]:
+    """Model kataloğunu yükler (taze önbellek -> agy -> bayat önbellek -> yerleşik)."""
+    state_root = get_state_root()
+    agy_bin = get_agy_binary()
+    memo_key = (state_root, agy_bin)
+    now = time.time()
+
+    if not refresh:
+        memo_entry = _CATALOG_MEMO.get(memo_key)
+        if memo_entry is not None:
+            memo_ts, memo_val = memo_entry
+            if (now - memo_ts) < _CATALOG_MEMO_TTL:
+                return {
+                    **memo_val,
+                    "models": [dict(m) for m in memo_val["models"]],
+                }
+
+    cache_path = os.path.join(state_root, MODELS_CACHE_FILENAME)
+    prev_cache = _read_models_cache(cache_path)
+
+    if (
+        not refresh
+        and prev_cache is not None
+        and (now - prev_cache["fetched_at"]) < MODELS_CACHE_TTL
+    ):
+        result: dict[str, Any] = {
+            "models": prev_cache["models"],
+            "kaynak": "onbellek",
+            "fetched_at": prev_cache["fetched_at"],
+        }
+        _CATALOG_MEMO[memo_key] = (
+            now,
+            {**result, "models": [dict(m) for m in result["models"]]},
+        )
+        return result
+
+    fetched = fetch_models_from_agy()
+    if fetched:
+        fetched_now = time.time()
+        if prev_cache is not None:
+            old_fams = set(families(prev_cache["models"]).keys())
+            new_fams = families(fetched)
+            added = [aile for aile in new_fams if aile not in old_fams]
+            if len(added) == 1:
+                print(tr("hint_new_family", aile=added[0]), file=sys.stderr)
+            elif len(added) > 1:
+                print(
+                    tr(
+                        "hint_new_families",
+                        aileler=", ".join(added),
+                        ornek=added[0],
+                    ),
+                    file=sys.stderr,
+                )
+
+        cache_payload = {"fetched_at": fetched_now, "models": fetched}
+        try:
+            _atomic_write_json(state_root, MODELS_CACHE_FILENAME, cache_payload)
+        except OSError:
+            pass
+
+        result = {
+            "models": fetched,
+            "kaynak": "agy",
+            "fetched_at": fetched_now,
+        }
+        _CATALOG_MEMO[memo_key] = (
+            fetched_now,
+            {**result, "models": [dict(m) for m in result["models"]]},
+        )
+        return result
+
+    if prev_cache is not None:
+        result = {
+            "models": prev_cache["models"],
+            "kaynak": "onbellek",
+            "fetched_at": prev_cache["fetched_at"],
+        }
+        _CATALOG_MEMO[memo_key] = (
+            now,
+            {**result, "models": [dict(m) for m in result["models"]]},
+        )
+        return result
+
+    result = {
+        "models": [dict(m) for m in BUILTIN_MODELS],
+        "kaynak": "yerlesik",
+        "fetched_at": None,
+    }
+    _CATALOG_MEMO[memo_key] = (
+        now,
+        {**result, "models": [dict(m) for m in result["models"]]},
+    )
+    return result
+
+
+def resolve_alias(
+    name: str,
+    models: list[dict[str, str]] | None = None,
+    *,
+    prefer_existing_for_legacy: bool = False,
+) -> str:
+    """Boş olmayan model takma adını veya tam kimliği çözümler."""
+    cleaned = name.strip()
+    if not cleaned:
+        return DEFAULT_MODEL
+    if cleaned in LEGACY_ALIASES and not prefer_existing_for_legacy:
+        return LEGACY_ALIASES[cleaned]
+    if models is None:
+        models = load_catalog()["models"]
+    dynamic = build_aliases(models)
+    if cleaned in LEGACY_ALIASES:
+        legacy_target = LEGACY_ALIASES[cleaned]
+        catalog_ids = {
+            m["id"] for m in models if isinstance(m, dict) and "id" in m
+        }
+        if legacy_target in catalog_ids:
+            return legacy_target
+        if cleaned in dynamic:
+            return dynamic[cleaned]
+        return legacy_target
+    if cleaned in dynamic:
+        return dynamic[cleaned]
+    return cleaned
+
+
+def default_model(models: list[dict[str, str]] | None = None) -> str:
+    """Otomatik varsayılan model kimliğini belirler (AJAN_MODEL > tercih sırası > DEFAULT_MODEL)."""
+    env_model = os.environ.get("AJAN_MODEL", "").strip()
+    if env_model:
+        return resolve_alias(env_model, models=models)
+    if models is None:
+        models = load_catalog()["models"]
+    fams = families(models)
+    for aile in PREFERRED_FAMILIES:
+        if aile in fams:
+            return resolve_alias(
+                aile, models=models, prefer_existing_for_legacy=True
+            )
+    return DEFAULT_MODEL
+
+
 def resolve_model(model_name: str | None) -> str:
     """Model takma adını tam model kimliğine çözümler."""
-    if not model_name:
-        return DEFAULT_MODEL
-    return MODEL_ALIASES.get(model_name, model_name)
+    cleaned = model_name.strip() if isinstance(model_name, str) else ""
+    if not cleaned:
+        return default_model()
+    return resolve_alias(cleaned)
 
 
 def path_covers(parent: str, child: str) -> bool:
@@ -295,10 +731,17 @@ def check_permissions(
 
 def add_permissions(missing_rules: list[str], settings_path: str) -> str:
     """
-    Eksik kuralları settings.json dosyasına ekler.
+    Eksik kuralları settings.json dosyasına atomik olarak ekler.
     Öncesinde settings.json.bak-<zaman> yedeği oluşturur.
     """
-    os.makedirs(os.path.dirname(os.path.abspath(settings_path)), exist_ok=True)
+    settings_dir = os.path.dirname(os.path.abspath(settings_path))
+    try:
+        os.makedirs(settings_dir, exist_ok=True)
+    except OSError as e:
+        raise ValueError(
+            tr("err_settings_write", path=settings_path, err=e)
+        ) from e
+
     data: dict[str, Any] = {}
 
     backup_path = ""
@@ -320,7 +763,12 @@ def add_permissions(missing_rules: list[str], settings_path: str) -> str:
         while os.path.exists(backup_path):
             backup_path = f"{settings_path}.bak-{ts}-{i}"
             i += 1
-        shutil.copy2(settings_path, backup_path)
+        try:
+            shutil.copy2(settings_path, backup_path)
+        except OSError as e:
+            raise ValueError(
+                tr("err_settings_write", path=settings_path, err=e)
+            ) from e
 
     if "permissions" not in data or not isinstance(data["permissions"], dict):
         data["permissions"] = {}
@@ -333,9 +781,37 @@ def add_permissions(missing_rules: list[str], settings_path: str) -> str:
         if rule not in data["permissions"]["allow"]:
             data["permissions"]["allow"].append(rule)
 
-    with open(settings_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    tmp_path = ""
+    try:
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=f"settings.json.{os.getpid()}.",
+            suffix=".tmp",
+            dir=settings_dir,
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, settings_path)
+    except OSError as e:
+        if tmp_path:
+            try:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise ValueError(
+            tr("err_settings_write", path=settings_path, err=e)
+        ) from e
+    except Exception:
+        if tmp_path:
+            try:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
 
     return backup_path
 
@@ -524,24 +1000,7 @@ def _is_izle_active(task_dir: str, etiket: str) -> bool:
 
 def save_meta(task_dir: str, meta: dict[str, Any]) -> None:
     """meta.json dosyasını benzersiz geçici dosya üzerinden atomik olarak yazar."""
-    os.makedirs(task_dir, exist_ok=True)
-    meta_path = os.path.join(task_dir, "meta.json")
-    fd, tmp_path = tempfile.mkstemp(
-        prefix=f"meta.json.{os.getpid()}.", suffix=".tmp", dir=task_dir
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2, ensure_ascii=False)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, meta_path)
-    except Exception:
-        try:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    _atomic_write_json(task_dir, "meta.json", meta)
 
 
 def load_meta(task_dir: str) -> dict[str, Any] | None:
@@ -562,41 +1021,27 @@ def build_gemini_md(
 ) -> str:
     """GEMINI.md için sabit ajan kurallarını ve görev metnini birleştirir."""
     if get_lang() == "en":
-        yaz_str = (
-            ", ".join(yaz_list)
-            if yaz_list
-            else "none (write permission not granted)"
-        )
-        komut_str = (
-            ", ".join(komut_list)
-            if komut_list
-            else "none (terminal disabled)"
-        )
+        yaz_str = ", ".join(yaz_list) if yaz_list else "none"
+        komut_str = ", ".join(komut_list) if komut_list else "none"
         return (
-            "# Fixed Agent Rules\n"
-            f"- You may only write to the following directories: {yaz_str}. Any attempt to write elsewhere will be rejected and the task will fail.\n"
-            f"- Allowed commands: {komut_str}. Commands must prefix-match.\n"
-            "- Do not modify or delete files not requested by the task. Do not relax existing tests.\n"
-            '- When finished, append a JSON block at the END of your response (```json ... ```): {"ozet": "...", '
-            '"degisen_dosyalar": ["..."], "calistirilan_testler": ["command: result"], "acik_konular": ["..."], '
-            '"basarili": true|false}. ajan extracts this block into rapor.json (if not found, derives from written files and response with "basarili": null).\n\n'
-            "---\n"
+            "# Rules\n"
+            f"- Write only in: {yaz_str}.\n"
+            f"- Allowed commands (prefix): {komut_str}.\n"
+            "- Do not touch/delete unrequested files; do not relax tests.\n"
+            '- End with ```json ... ```: {"ozet":"...","degisen_dosyalar":[...],'
+            '"calistirilan_testler":["cmd: res"],"acik_konular":[...],"basarili":true|false}\n\n'
             f"## Task\n{gorev_metni}\n"
         )
 
-    yaz_str = ", ".join(yaz_list) if yaz_list else "yok (yazma izni verilmedi)"
-    komut_str = ", ".join(komut_list) if komut_list else "yok (terminal kapalı)"
-
+    yaz_str = ", ".join(yaz_list) if yaz_list else "yok"
+    komut_str = ", ".join(komut_list) if komut_list else "yok"
     return (
-        "# Sabit Ajan Kuralları\n"
-        f"- Yalnız şu dizinlere yazabilirsin: {yaz_str}. Başka yere yazma girişimi reddedilir ve görev başarısız olur.\n"
-        f"- Çalıştırabileceğin komutlar: {komut_str}. Komutun önek eşleşmesi gerekir.\n"
-        "- Görevde istenmeyen dosyaları değiştirme, silme. Var olan testleri gevşetme.\n"
-        '- Bitirince yanıtının SONUNA şu biçimde bir JSON bloğu koy (```json ... ```): {"ozet": "...", '
-        '"degisen_dosyalar": ["..."], "calistirilan_testler": ["komut: sonuç"], "acik_konular": ["..."], '
-        '"basarili": true|false}. ajan bu bloğu rapor.json\'a çıkarır (bulamazsa yazilan_dosyalar\'dan ve yanıttan '
-        'rapor üretir, "basarili": null).\n\n'
-        "---\n"
+        "# Kurallar\n"
+        f"- Yalnız şu dizinlere yaz: {yaz_str}.\n"
+        f"- İzinli komutlar (önek): {komut_str}.\n"
+        "- İstenmeyen dosyalara dokunma/silme; testleri gevşetme.\n"
+        '- Yanıt sonunda ```json ... ``` bloğu ver: {"ozet":"...","degisen_dosyalar":[...],'
+        '"calistirilan_testler":["komut: sonuç"],"acik_konular":[...],"basarili":true|false}\n\n'
         f"## Görev\n{gorev_metni}\n"
     )
 
@@ -758,6 +1203,15 @@ def extract_dogrulama_ozet(cikti: str, limit: int = 5) -> str:
     return lines[-1] if lines else ""
 
 
+def _decode_output(val: str | bytes | None) -> str:
+    """subprocess çıktısını str'ye dönüştürür (bytes ise UTF-8 çözer)."""
+    if val is None:
+        return ""
+    if isinstance(val, bytes):
+        return val.decode("utf-8", errors="replace")
+    return str(val)
+
+
 def run_dogrulama_komut(
     komut: str,
     cwd: str | None = None,
@@ -780,13 +1234,15 @@ def run_dogrulama_komut(
         )
         return proc.returncode, proc.stdout or ""
     except subprocess.TimeoutExpired as e:
-        out = (e.stdout or "") if isinstance(e.stdout, str) else ""
-        if e.stderr:
-            out += "\n" + (e.stderr if isinstance(e.stderr, str) else "")
-        out += f"\nZaman aşımı ({zaman_asimi}s) aşıldı."
+        out = _decode_output(e.stdout)
+        err = _decode_output(e.stderr)
+        if err:
+            out = f"{out.rstrip(chr(10))}\n{err}" if out else err
+        note = tr("verify_timeout", timeout=zaman_asimi)
+        out = f"{out.rstrip(chr(10))}\n{note}" if out else note
         return 124, out
     except Exception as e:
-        return 1, f"Komut çalıştırılamadı: {e}"
+        return 1, tr("err_verify_cmd_exec", err=e)
 
 
 # ---------------------------------------------------------------------------
@@ -1087,10 +1543,21 @@ def run_bekci(etiket: str) -> None:
 # ---------------------------------------------------------------------------
 # Komut Yöneticileri
 # ---------------------------------------------------------------------------
+def _require_agy_binary() -> bool:
+    """agy ikilisinin erişilebilir ve çalıştırılabilir olduğunu doğrular."""
+    agy_bin = get_agy_binary()
+    if not agy_bin or shutil.which(agy_bin) is None:
+        print(tr("err_agy_not_found", agy=agy_bin), file=sys.stderr)
+        return False
+    return True
+
+
 def cmd_baslat(args: argparse.Namespace) -> None:
     etiket = args.etiket
     state_root = get_state_root()
     task_dir = require_task_dir(etiket, state_root)
+    if not _require_agy_binary():
+        sys.exit(1)
     settings_path = get_settings_path()
 
     yaz_list = [
@@ -1106,13 +1573,28 @@ def cmd_baslat(args: argparse.Namespace) -> None:
         contents: list[str] = []
         for fpath in args.gorev_dosyalari:
             p = os.path.abspath(os.path.expanduser(fpath))
-            if not os.path.isfile(p):
+            if not os.path.exists(p):
                 print(
                     tr("err_task_file_not_found", fpath=fpath), file=sys.stderr
                 )
                 sys.exit(1)
-            with open(p, "r", encoding="utf-8") as f:
-                contents.append(f.read())
+            if os.path.isdir(p):
+                err_msg = "is a directory" if get_lang() == "en" else "bir dizin"
+                print(
+                    tr("err_task_file_unreadable", fpath=fpath, err=err_msg),
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    contents.append(f.read())
+            except (OSError, UnicodeDecodeError) as e:
+                err_msg = str(e).replace("\n", " ")
+                print(
+                    tr("err_task_file_unreadable", fpath=fpath, err=err_msg),
+                    file=sys.stderr,
+                )
+                sys.exit(1)
         gorev_metni = "\n\n".join(contents)
     elif args.mesaj:
         gorev_metni = args.mesaj
@@ -1254,6 +1736,8 @@ def calistir_devam(
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
+    if not _require_agy_binary():
+        return 1
     if not os.path.exists(task_dir):
         print(tr("err_task_not_found", etiket=etiket), file=sys.stderr)
         return 1
@@ -1379,10 +1863,12 @@ def cmd_dogrula(args: argparse.Namespace) -> None:
     max_duzeltme = max(0, args.tur)
     duzeltme_sayisi = 0
     deneme = 1
+    son_cikti = ""
     while True:
         cikis, cikti = run_dogrulama_komut(
             komut, cwd=cwd, zaman_asimi=args.zaman_asimi
         )
+        son_cikti = cikti
         if cikis == 0:
             _append_dogrulama_record(task_dir, meta, deneme, komut, 0, "")
             print("DOGRULANDI")
@@ -1396,20 +1882,18 @@ def cmd_dogrula(args: argparse.Namespace) -> None:
             break
 
         lines = cikti.splitlines()
-        son_60 = (
-            "\n".join(lines[-60:]) if len(lines) > 60 else "\n".join(lines)
-        )
+        son = "\n".join(lines[-40:])
         if get_lang() == "en":
             mesaj = (
-                f"Verification command failed: {komut}\n"
-                f"```\n{son_60}\n```\n"
-                "Find and fix the root cause. Do not relax tests."
+                f"Verification failed: {komut}\n"
+                f"```\n{son}\n```\n"
+                "Fix the root cause; do not relax tests."
             )
         else:
             mesaj = (
-                f"Doğrulama komutu başarısız: {komut}\n"
-                f"```\n{son_60}\n```\n"
-                "Kök nedeni bul ve düzelt. Testleri gevşetme."
+                f"Doğrulama başarısız: {komut}\n"
+                f"```\n{son}\n```\n"
+                "Kök nedeni düzelt, testleri gevşetme."
             )
 
         duzeltme_sayisi += 1
@@ -1429,6 +1913,8 @@ def cmd_dogrula(args: argparse.Namespace) -> None:
 
         deneme += 1
 
+    if son_cikti.strip():
+        print("\n".join(son_cikti.splitlines()[-20:]), file=sys.stderr)
     print(f"DOGRULANAMADI ({duzeltme_sayisi} tur)")
     sys.exit(1)
 
@@ -1467,7 +1953,7 @@ def cmd_durum(args: argparse.Namespace) -> None:
         )
         yazilan_sayisi = len(meta.get("yazilan_dosyalar", []))
         son_adim = meta.get("son_adim") or "-"
-        model = meta.get("model") or "neon"
+        model = meta.get("model") or "-"
         tur = meta.get("tur", 1)
 
         dogrulama_sonucu = "-"
@@ -1981,20 +2467,128 @@ def cmd_izin_kontrol(args: argparse.Namespace) -> None:
         sys.exit(0)
 
 
+def cmd_modeller(args: argparse.Namespace) -> None:
+    """Kullanılabilir modelleri, Gemini ailelerini ve takma adları listeler."""
+    catalog = load_catalog(refresh=bool(getattr(args, "yenile", False)))
+    models = catalog["models"]
+    kaynak = catalog["kaynak"]
+
+    fams = families(models)
+    aliases = build_aliases(models)
+    varsayilan_id = default_model(models=models)
+    m_def = GEMINI_MODEL_RE.fullmatch(varsayilan_id)
+    varsayilan_aile = m_def.group(2) if m_def else None
+
+    ordered_family_names = [a for a in PREFERRED_FAMILIES if a in fams] + [
+        a for a in fams if a not in PREFERRED_FAMILIES
+    ]
+
+    if getattr(args, "json", False):
+        aileler_json: dict[str, dict[str, Any]] = {}
+        for aile in ordered_family_names:
+            info = fams[aile]
+            aileler_json[aile] = {
+                "surum": ".".join(str(x) for x in info["surum"]),
+                "seviyeler": dict(info["seviyeler"]),
+            }
+        payload = {
+            "kaynak": kaynak,
+            "varsayilan": varsayilan_id,
+            "varsayilan_aile": varsayilan_aile,
+            "takma_adlar": aliases,
+            "aileler": aileler_json,
+            "modeller": models,
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    kaynak_label = tr(f"models_source_{kaynak}")
+    varsayilan_disp = (
+        f"{varsayilan_id} ({varsayilan_aile})"
+        if varsayilan_aile
+        else varsayilan_id
+    )
+    print(
+        tr(
+            "models_header",
+            kaynak=kaynak_label,
+            adet=len(models),
+            varsayilan=varsayilan_disp,
+        )
+    )
+
+    aliases_by_id: dict[str, list[str]] = {}
+    for alias_name, target_id in aliases.items():
+        aliases_by_id.setdefault(target_id, []).append(alias_name)
+
+    print()
+    print(tr("models_gemini_families"))
+    if ordered_family_names:
+        for aile in ordered_family_names:
+            info = fams[aile]
+            surum_str = ".".join(str(x) for x in info["surum"])
+            is_def_fam = (
+                varsayilan_aile == aile
+                and varsayilan_id in info["seviyeler"].values()
+            )
+            fam_suffix = f" * {tr('models_default_tag')}" if is_def_fam else ""
+            print(f"  {aile} (v{surum_str}){fam_suffix}")
+            for lvl in LEVEL_ORDER:
+                mid = info["seviyeler"].get(lvl)
+                if not mid:
+                    continue
+                al_list = aliases_by_id.get(mid, [])
+                al_str = f"  [{', '.join(al_list)}]" if al_list else ""
+                mark = " *" if mid == varsayilan_id else ""
+                print(f"    {lvl:<6}  {mid}{al_str}{mark}")
+    else:
+        print(tr("models_none_gemini"))
+
+    other_gemini = [
+        m
+        for m in models
+        if m["id"].startswith("gemini-")
+        and not GEMINI_MODEL_RE.fullmatch(m["id"])
+    ]
+    if other_gemini:
+        print()
+        print(tr("models_other_gemini"))
+        for m in other_gemini:
+            mark = (
+                f" * {tr('models_default_tag')}"
+                if m["id"] == varsayilan_id
+                else ""
+            )
+            print(f"  {m['id']}  ({m['ad']}){mark}")
+
+    non_gemini = [m for m in models if not m["id"].startswith("gemini-")]
+    if non_gemini:
+        print()
+        print(tr("models_non_gemini", adet=len(non_gemini)))
+        names = [
+            f"{m['id']} *" if m["id"] == varsayilan_id else m["id"]
+            for m in non_gemini
+        ]
+        print("  " + ", ".join(names))
+
+
 # ---------------------------------------------------------------------------
 # Ana Giriş Noktası
 # ---------------------------------------------------------------------------
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="ajan - Gemini (agy CLI) alt ajan yöneticisi", prog="baton"
+        description=tr("help_desc"), prog="baton"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # 1. baslat
     p_baslat = subparsers.add_parser(
-        "baslat", aliases=["start"], help="Yeni bir ajan görevi başlat"
+        "baslat",
+        aliases=["start"],
+        help=tr("help_cmd_baslat"),
+        description=tr("help_cmd_baslat"),
     )
-    p_baslat.add_argument("etiket", help="Görev etiketi")
+    p_baslat.add_argument("etiket", help=tr("help_arg_etiket"))
     g_input = p_baslat.add_mutually_exclusive_group(required=True)
     g_input.add_argument(
         "-g",
@@ -2002,172 +2596,234 @@ def main() -> None:
         "--task-files",
         action="extend",
         nargs="+",
-        help="Görev metnini içeren dosyalar",
+        help=tr("help_arg_gorev_dosyalari"),
     )
-    g_input.add_argument("-m", "--mesaj", "--message", help="Görev metni")
+    g_input.add_argument(
+        "-m", "--mesaj", "--message", help=tr("help_arg_mesaj")
+    )
     p_baslat.add_argument(
         "--model",
-        default="neon",
-        help="Model (neon, neon-high, neon-orta, hydrogen, hydrogen-high, hydrogen-orta, flash, flash-orta, argon, argon-orta veya tam kimlik)",
+        default=None,
+        help=tr("help_arg_model"),
     )
     p_baslat.add_argument(
         "--effort",
         choices=["low", "medium", "high", "xhigh", "max"],
-        help="Düşünme eforu",
+        help=tr("help_arg_effort"),
     )
     p_baslat.add_argument(
         "--yaz",
         "--write",
         action="append",
         default=[],
-        help="Yazma izni verilecek dizin (--add-dir eklenir)",
+        help=tr("help_arg_yaz"),
     )
     p_baslat.add_argument(
         "--oku",
         "--read",
         action="append",
         default=[],
-        help="Okuma izni verilecek dizin (--add-dir eklenir)",
+        help=tr("help_arg_oku"),
     )
     p_baslat.add_argument(
         "--komut",
         "--allow-cmd",
         action="append",
         default=[],
-        help="Çalıştırılabilecek komut öneki",
+        help=tr("help_arg_komut"),
     )
     p_baslat.add_argument(
-        "--sure", "--max-time", help="Maksimum süre (ör. 30m, 1h, 1800s)"
+        "--sure", "--max-time", help=tr("help_arg_sure")
     )
     p_baslat.add_argument(
-        "--sandbox", action="store_true", help="Sandbox modunu etkinleştir"
+        "--sandbox", action="store_true", help=tr("help_arg_sandbox")
     )
     p_baslat.add_argument(
         "--izin-ekle",
         "--add-perms",
         action="store_true",
-        help="Eksik izinleri settings.json'a otomatik ekle",
+        help=tr("help_arg_izin_ekle"),
     )
     p_baslat.add_argument(
-        "--bekle", "--wait", action="store_true", help="Görev bitene kadar bekle"
+        "--bekle", "--wait", action="store_true", help=tr("help_arg_bekle")
     )
 
     # 2. devam
     p_devam = subparsers.add_parser(
-        "devam", aliases=["continue"], help="Mevcut göreve yeni turla devam et"
+        "devam",
+        aliases=["continue"],
+        help=tr("help_cmd_devam"),
+        description=tr("help_cmd_devam"),
     )
-    p_devam.add_argument("etiket", help="Görev etiketi")
+    p_devam.add_argument("etiket", help=tr("help_arg_etiket"))
     p_devam.add_argument(
-        "-m", "--mesaj", "--message", required=True, help="Takip mesajı"
+        "-m",
+        "--mesaj",
+        "--message",
+        required=True,
+        help=tr("help_arg_takip_mesaj"),
     )
     p_devam.add_argument(
-        "--bekle", "--wait", action="store_true", help="Görev bitene kadar bekle"
+        "--bekle", "--wait", action="store_true", help=tr("help_arg_bekle")
     )
 
     # 3. durum
     p_durum = subparsers.add_parser(
-        "durum", aliases=["status"], help="Görev durumlarını görüntüle"
+        "durum",
+        aliases=["status"],
+        help=tr("help_cmd_durum"),
+        description=tr("help_cmd_durum"),
     )
-    p_durum.add_argument("etiket", nargs="?", help="Görev etiketi")
+    p_durum.add_argument("etiket", nargs="?", help=tr("help_arg_etiket"))
     p_durum.add_argument(
-        "--json", action="store_true", help="JSON formatında çıktı ver"
+        "--json", action="store_true", help=tr("help_arg_json")
     )
 
     # 4. bekle
     p_bekle = subparsers.add_parser(
-        "bekle", aliases=["wait"], help="Görevlerin bitmesini bekle"
+        "bekle",
+        aliases=["wait"],
+        help=tr("help_cmd_bekle"),
+        description=tr("help_cmd_bekle"),
     )
     p_bekle.add_argument(
-        "etiketler", nargs="*", help="Beklenecek görev etiketleri"
+        "etiketler", nargs="*", help=tr("help_arg_etiketler")
     )
     p_bekle.add_argument(
-        "--zaman-asimi", "--timeout", type=float, help="Zaman aşımı süresi (saniye)"
+        "--zaman-asimi",
+        "--timeout",
+        type=float,
+        help=tr("help_arg_zaman_asimi"),
     )
 
     # 5. rapor
     p_rapor = subparsers.add_parser(
-        "rapor", aliases=["report"], help="Görev raporunu veya ham yanıtı göster"
+        "rapor",
+        aliases=["report"],
+        help=tr("help_cmd_rapor"),
+        description=tr("help_cmd_rapor"),
     )
-    p_rapor.add_argument("etiket", help="Görev etiketi")
+    p_rapor.add_argument("etiket", help=tr("help_arg_etiket"))
     p_rapor.add_argument(
-        "--ham", "--raw", action="store_true", help="Ham yanıtı (yanit.md) göster"
+        "--ham", "--raw", action="store_true", help=tr("help_arg_ham")
     )
 
     # 6. izle
     p_izle = subparsers.add_parser(
-        "izle", aliases=["watch"], help="Görev olay akışını canlı takip et"
+        "izle",
+        aliases=["watch"],
+        help=tr("help_cmd_izle"),
+        description=tr("help_cmd_izle"),
     )
-    p_izle.add_argument("etiket", help="Görev etiketi")
+    p_izle.add_argument("etiket", help=tr("help_arg_etiket"))
 
     # 7. iptal
     p_iptal = subparsers.add_parser(
-        "iptal", aliases=["cancel"], help="Çalışan bir görevi iptal et"
+        "iptal",
+        aliases=["cancel"],
+        help=tr("help_cmd_iptal"),
+        description=tr("help_cmd_iptal"),
     )
-    p_iptal.add_argument("etiket", help="Görev etiketi")
+    p_iptal.add_argument("etiket", help=tr("help_arg_etiket"))
 
     # 8. temizle
     p_temizle = subparsers.add_parser(
-        "temizle", aliases=["clean"], help="Eski görevleri temizle"
+        "temizle",
+        aliases=["clean"],
+        help=tr("help_cmd_temizle"),
+        description=tr("help_cmd_temizle"),
     )
     p_temizle.add_argument(
         "--gun",
         "--days",
         type=int,
         default=7,
-        help="Kaç günden eski görevlerin temizleneceği (varsayılan: 7)",
+        help=tr("help_arg_gun"),
     )
 
     # 9. izin
     p_izin = subparsers.add_parser(
-        "izin", aliases=["perms"], help="İzin yönetimi"
+        "izin",
+        aliases=["perms"],
+        help=tr("help_cmd_izin"),
+        description=tr("help_cmd_izin"),
     )
     izin_sub = p_izin.add_subparsers(dest="izin_command", required=True)
     p_izin_kontrol = izin_sub.add_parser(
-        "kontrol", aliases=["check"], help="İzinleri denetle"
+        "kontrol",
+        aliases=["check"],
+        help=tr("help_cmd_izin_kontrol"),
+        description=tr("help_cmd_izin_kontrol"),
     )
     p_izin_kontrol.add_argument(
-        "--yaz", "--write", action="append", default=[], help="Yazma izni dizini"
+        "--yaz",
+        "--write",
+        action="append",
+        default=[],
+        help=tr("help_arg_izin_yaz"),
     )
     p_izin_kontrol.add_argument(
-        "--komut", "--allow-cmd", action="append", default=[], help="Komut öneki"
+        "--komut",
+        "--allow-cmd",
+        action="append",
+        default=[],
+        help=tr("help_arg_izin_komut"),
     )
     p_izin_kontrol.add_argument(
         "--izin-ekle",
         "--add-perms",
         action="store_true",
-        help="Eksik izinleri otomatik ekle",
+        help=tr("help_arg_izin_ekle_kisa"),
     )
 
     # 10. dogrula
     p_dogrula = subparsers.add_parser(
         "dogrula",
         aliases=["verify"],
-        help="Otomatik test ve düzeltme döngüsü ile görevi doğrula",
+        help=tr("help_cmd_dogrula"),
+        description=tr("help_cmd_dogrula"),
     )
-    p_dogrula.add_argument("etiket", help="Görev etiketi")
+    p_dogrula.add_argument("etiket", help=tr("help_arg_etiket"))
     p_dogrula.add_argument(
-        "--test", required=True, help="Çalıştırılacak doğrulama komutu"
+        "--test", required=True, help=tr("help_arg_test")
     )
     p_dogrula.add_argument(
         "--tur",
         "--rounds",
         type=int,
         default=3,
-        help="Maksimum düzeltme turu sayısı; test en fazla N+1 kez çalıştırılır (varsayılan: 3)",
+        help=tr("help_arg_tur"),
     )
     p_dogrula.add_argument(
-        "--cwd", help="Komutun çalıştırılacağı dizin"
+        "--cwd", help=tr("help_arg_cwd")
     )
     p_dogrula.add_argument(
         "--zaman-asimi",
         "--timeout",
         type=float,
-        help="Komut zaman aşımı süresi (saniye)",
+        help=tr("help_arg_dogrula_zaman_asimi"),
+    )
+
+    # 11. modeller
+    p_modeller = subparsers.add_parser(
+        "modeller",
+        aliases=["models"],
+        help=tr("help_cmd_modeller"),
+        description=tr("help_cmd_modeller"),
+    )
+    p_modeller.add_argument(
+        "--yenile",
+        "--refresh",
+        action="store_true",
+        help=tr("help_arg_yenile"),
+    )
+    p_modeller.add_argument(
+        "--json", action="store_true", help=tr("help_arg_json")
     )
 
     # Dahili bekçi
     p_bekci = subparsers.add_parser("_bekci", help=argparse.SUPPRESS)
-    p_bekci.add_argument("etiket", help="Görev etiketi")
+    p_bekci.add_argument("etiket", help=tr("help_arg_etiket"))
 
     args = parser.parse_args()
 
@@ -2190,6 +2846,8 @@ def main() -> None:
         "cancel": cmd_iptal,
         "temizle": cmd_temizle,
         "clean": cmd_temizle,
+        "modeller": cmd_modeller,
+        "models": cmd_modeller,
     }
     if args.command in command_handlers:
         command_handlers[args.command](args)

@@ -23,7 +23,7 @@ You ─▶ Claude Code            plans, writes the task file, verifies with you
 - **Narrow write access.** Gemini may only write to the `--yaz` directories. Missing rules stop the run with exit code 2 before any tokens are spent.
 - **Sandboxed by default.** With no `--komut` prefixes the terminal is disabled (`--sandbox`).
 - **Context-friendly for Claude.** `rapor` prints a compact summary, and the optional subagent keeps the whole loop out of your main session.
-- **Zero dependencies.** A single Python 3.10+ file using only the standard library, with 42 tests that run against a fake `agy`.
+- **Zero dependencies.** A single Python 3.10+ file using only the standard library, with 60 tests that run against a fake `agy`.
 
 ## Requirements
 
@@ -114,19 +114,21 @@ Subcommands are Turkish. The English meaning is in the second column.
 | `iptal <tag>` | cancel running task (SIGTERM, then SIGKILL after 5 s; exit 1 if not running) | |
 | `temizle` | delete old tasks | `--gun DAYS` (default 7) |
 | `izin kontrol` | check permissions only | `--yaz`, `--komut`, `--izin-ekle` |
+| `modeller` (`models`) | list available models and aliases | `--yenile` (`--refresh`), `--json` |
 
 Task tags (`<tag>`) may only contain `[A-Za-z0-9._-]` and must be 1–64 characters long.
 
-Model aliases: `neon` → `gemini-4-neon-xhigh` (default), `neon-high`, `neon-orta`, `hydrogen` → `gemini-4-hydrogen-xhigh`, `hydrogen-high`, `hydrogen-orta`, `flash` → `gemini-3.8-flash-high`, `flash-orta` → `gemini-3.8-flash-medium`, `argon` → `gemini-4-argon-high`, `argon-orta` → `gemini-4-argon-medium`. You can also pass any full model ID.
+Model aliases are derived dynamically from the `agy models` catalog (`<family>`, `<family>-high`, `<family>-orta`, `<family>-low`, plus any full model ID). The default model is selected automatically from the first available family on your account in preference order (`neon` → `hydrogen` → `argon` → `flash`), and can be overridden with `AJAN_MODEL` or `--model`. Run `baton modeller` to inspect available families and aliases. The catalog is cached for 24 hours; when a new Gemini family appears on refresh, a single-line notice is printed to stderr.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `AJAN_DIL` | `tr` | Message and prompt language: `tr` or `en` |
+| `AJAN_DIL` | `tr` | `--help`, message and prompt language: `tr` or `en` |
 | `AJAN_AGY` | `agy` | Path to the `agy` binary |
 | `AJAN_DIZIN` | `$XDG_STATE_HOME/ajan` or `~/.local/state/ajan` | Task state directory |
 | `AJAN_AYAR` | `~/.gemini/antigravity-cli/settings.json` | agy permissions file |
+| `AJAN_MODEL` | automatic | Default model alias or full model ID (overridden by `--model`) |
 
 ## Permissions
 
@@ -148,7 +150,7 @@ Model aliases: `neon` → `gemini-4-neon-xhigh` (default), `neon-high`, `neon-or
 ## Limitations
 
 - Requires a local, signed-in `agy`. Tasks run on the same machine; there is no remote worker support.
-- Subcommands, the skill and the subagent prompts are written in Turkish. Setting `AJAN_DIL=en` translates status messages and task prompts, though `--help` and some outputs remain in Turkish.
+- Subcommands, the skill and the subagent prompts are written in Turkish (English aliases such as `start`, `wait`, `report` also work). Setting `AJAN_DIL=en` translates `--help`, status messages and task prompts; `agy` output and task contents stay as they are.
 - The token count shown by `durum` covers input and output; cache reads are not shown.
 - Not affiliated with Anthropic or Google.
 
