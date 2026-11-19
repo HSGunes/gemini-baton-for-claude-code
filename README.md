@@ -9,6 +9,10 @@ Claude writes the task and acceptance criteria. Gemini implements it in the back
 
 [Türkçe README](README.tr.md)
 
+<p align="center"><img src="assets/demo.svg" alt="Terminal demo: baton hands a failing slugify() fix to Gemini, then pytest passes" width="900"></p>
+
+*Recorded from a real run ([`assets/demo.txt`](assets/demo.txt); path truncated), regenerated with `python3 scripts/make_demo_svg.py assets/demo.txt assets/demo.svg`; Gemini fixed `src/slug.py`, 1 round, 75.2 s, 41,611 tokens (`baton durum`).*
+
 ```text
 You ─▶ Claude Code            plans, writes the task file, verifies with your tests
          └─▶ baton:ajan-yonetici   optional Sonnet subagent that runs the whole loop
@@ -25,6 +29,21 @@ You ─▶ Claude Code            plans, writes the task file, verifies with you
 - **Context-friendly for Claude.** `rapor` prints a compact summary, and the optional subagent keeps the whole loop out of your main session.
 - **Orchestrator models.** agy's orchestrator models can be selected explicitly with `--orkestra` (`--orchestrate`); they are never selected automatically as the default.
 - **Zero dependencies.** A single Python 3.10+ file using only the standard library, with 65 tests that run against a fake `agy`.
+
+## Measured cost
+
+Individual measurements from development sessions on this repository:
+
+| Task | Gemini (`baton durum`) | Claude side |
+|---|---|---|
+| Automatic model catalog feature (model: neon) | ~420k tokens, 716 s | ~48k tokens (Sonnet manager subagent) |
+| Orchestrator mode feature (`--orkestra`) | ~459k tokens, 485 s | ~56k tokens (Sonnet manager subagent) |
+| End-to-end small fix via `/baton:devret` (model: hydrogen) | ~40k tokens, 36 s | not measured |
+| Demo above (slugify fix) | 41,611 tokens, 75.2 s | not measured |
+
+- These are individual measurements from this project's own development sessions, not a benchmark; every task is different. The Gemini column is `baton durum` tokens (input + output; cache reads are not included).
+- "Claude side" is the reported total token count of the `baton:ajan-yonetici` Sonnet subagent (writing the task, waiting, checking). The main session only sees a short result; the main session's own tokens are not in this table. The Claude side was not measured for the last two rows.
+- Simple math: in the first two tasks, about 10–11% of the combined tokens were on the Claude side and about 89–90% on Gemini (48/(420+48) ≈10.3%; 56/(459+56) ≈10.9%). Tokens are not the same price or quota unit across the two providers; this is not a "money saved" claim, just an indication of where the work shifts.
 
 ## Requirements
 
@@ -168,7 +187,9 @@ ln -sfn "$PWD/bin/baton" ~/.local/bin/baton   # use your clone directly
 
 Without the plugin, `python3 ajan.py --help` works with no install, and `pip install .` registers the `baton` and `ajan` commands.
 
-Issues and pull requests are welcome. Please include a test for behaviour changes.
+The social preview image (uploaded in GitHub repository settings, not used in the README) is regenerated with `python3 scripts/make_social_preview.py` (requires Pillow); for the demo, run `python3 scripts/make_demo_svg.py assets/demo.txt assets/demo.svg`.
+
+Issues and pull requests are welcome. Please include a test for behaviour changes. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

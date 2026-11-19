@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 936" width="900" height="936" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" role="img" aria-label="baton demo terminal recording">
+  <title>baton demo</title>
+  <defs>
+    <clipPath id="screen"><rect x="0" y="39" width="872" height="896"/></clipPath>
+  </defs>
+  <style>
+    text{font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace;font-size:14px;white-space:pre}
+    .title{fill:#8b949e;font-size:13px;font-weight:600}
+    .out{fill:#c9d1d9}
+    .cmd{fill:#a5d6ff}
+    .prompt{fill:#58a6ff;font-weight:700}
+    .err{fill:#f85149}
+    .ok{fill:#3fb950}
+    .warn{fill:#e3b341}
+    .head{fill:#d2a8ff}
+    .dim{fill:#8b949e}
+    .b{font-weight:700}
+    .line{animation-duration:23.37s;animation-timing-function:linear;animation-iteration-count:infinite;animation-fill-mode:both}
+    .mask{opacity:0;animation-duration:23.37s;animation-timing-function:linear;animation-iteration-count:infinite;animation-fill-mode:both}
+    .l0{animation-name:l0}@keyframes l0{0%,94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l1{animation-name:l1}@keyframes l1{0%{opacity:0;animation-timing-function:step-end}5.34%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l2{animation-name:l2}@keyframes l2{0%{opacity:0;animation-timing-function:step-end}6.03%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l3{animation-name:l3}@keyframes l3{0%{opacity:0;animation-timing-function:step-end}6.71%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l5{animation-name:l5}@keyframes l5{0%{opacity:0;animation-timing-function:step-end}7.65%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l6{animation-name:l6}@keyframes l6{0%{opacity:0;animation-timing-function:step-end}8.34%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l7{animation-name:l7}@keyframes l7{0%{opacity:0;animation-timing-function:step-end}9.02%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l8{animation-name:l8}@keyframes l8{0%{opacity:0;animation-timing-function:step-end}9.71%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l9{animation-name:l9}@keyframes l9{0%{opacity:0;animation-timing-function:step-end}10.39%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l10{animation-name:l10}@keyframes l10{0%{opacity:0;animation-timing-function:step-end}11.08%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l12{animation-name:l12}@keyframes l12{0%{opacity:0;animation-timing-function:step-end}12.02%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l13{animation-name:l13}@keyframes l13{0%{opacity:0;animation-timing-function:step-end}12.70%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l14{animation-name:l14}@keyframes l14{0%{opacity:0;animation-timing-function:step-end}13.39%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l15{animation-name:l15}@keyframes l15{0%{opacity:0;animation-timing-function:step-end}14.07%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l16{animation-name:l16}@keyframes l16{0%{opacity:0;animation-timing-function:step-end}17.32%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l17{animation-name:l17}@keyframes l17{0%{opacity:0;animation-timing-function:step-end}26.74%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l18{animation-name:l18}@keyframes l18{0%{opacity:0;animation-timing-function:step-end}38.08%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l19{animation-name:l19}@keyframes l19{0%{opacity:0;animation-timing-function:step-end}41.33%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l20{animation-name:l20}@keyframes l20{0%{opacity:0;animation-timing-function:step-end}46.68%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l21{animation-name:l21}@keyframes l21{0%{opacity:0;animation-timing-function:step-end}47.36%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l23{animation-name:l23}@keyframes l23{0%{opacity:0;animation-timing-function:step-end}48.30%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l24{animation-name:l24}@keyframes l24{0%{opacity:0;animation-timing-function:step-end}48.99%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l25{animation-name:l25}@keyframes l25{0%{opacity:0;animation-timing-function:step-end}49.67%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l27{animation-name:l27}@keyframes l27{0%{opacity:0;animation-timing-function:step-end}50.62%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l28{animation-name:l28}@keyframes l28{0%{opacity:0;animation-timing-function:step-end}51.30%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l30{animation-name:l30}@keyframes l30{0%{opacity:0;animation-timing-function:step-end}52.24%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l31{animation-name:l31}@keyframes l31{0%{opacity:0;animation-timing-function:step-end}52.93%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l33{animation-name:l33}@keyframes l33{0%{opacity:0;animation-timing-function:step-end}53.87%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l34{animation-name:l34}@keyframes l34{0%{opacity:0;animation-timing-function:step-end}54.55%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l35{animation-name:l35}@keyframes l35{0%{opacity:0;animation-timing-function:step-end}55.24%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l36{animation-name:l36}@keyframes l36{0%{opacity:0;animation-timing-function:step-end}58.49%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l37{animation-name:l37}@keyframes l37{0%{opacity:0;animation-timing-function:step-end}63.84%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l38{animation-name:l38}@keyframes l38{0%{opacity:0;animation-timing-function:step-end}64.52%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l39{animation-name:l39}@keyframes l39{0%{opacity:0;animation-timing-function:step-end}67.77%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l40{animation-name:l40}@keyframes l40{0%{opacity:0;animation-timing-function:step-end}73.12%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l41{animation-name:l41}@keyframes l41{0%{opacity:0;animation-timing-function:step-end}73.81%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .l42{animation-name:l42}@keyframes l42{0%{opacity:0;animation-timing-function:step-end}74.49%{opacity:1;animation-timing-function:linear}94.43%{opacity:1}97.86%,100%{opacity:0}}
+    .m0{animation-name:m0}@keyframes m0{0%{opacity:1;transform:translateX(0px);animation-timing-function:steps(20,end)}3.42%{opacity:1;transform:translateX(178px);animation-timing-function:step-end}5.34%,100%{opacity:0;transform:translateX(178px)}}
+    .m16{animation-name:m16}@keyframes m16{0%{opacity:0;transform:translateX(0px);animation-timing-function:step-end}17.32%{opacity:1;transform:translateX(0px);animation-timing-function:steps(48,end)}26.74%{opacity:1;transform:translateX(790px);animation-timing-function:step-end}26.75%,100%{opacity:0;transform:translateX(790px)}}
+    .m17{animation-name:m17}@keyframes m17{0%{opacity:0;transform:translateX(0px);animation-timing-function:step-end}26.74%{opacity:1;transform:translateX(0px);animation-timing-function:steps(48,end)}36.15%{opacity:1;transform:translateX(799px);animation-timing-function:step-end}38.08%,100%{opacity:0;transform:translateX(799px)}}
+    .m19{animation-name:m19}@keyframes m19{0%{opacity:0;transform:translateX(0px);animation-timing-function:step-end}41.33%{opacity:1;transform:translateX(0px);animation-timing-function:steps(16,end)}44.75%{opacity:1;transform:translateX(144px);animation-timing-function:step-end}46.68%,100%{opacity:0;transform:translateX(144px)}}
+    .m36{animation-name:m36}@keyframes m36{0%{opacity:0;transform:translateX(0px);animation-timing-function:step-end}58.49%{opacity:1;transform:translateX(0px);animation-timing-function:steps(20,end)}61.91%{opacity:1;transform:translateX(178px);animation-timing-function:step-end}63.84%,100%{opacity:0;transform:translateX(178px)}}
+    .m39{animation-name:m39}@keyframes m39{0%{opacity:0;transform:translateX(0px);animation-timing-function:step-end}67.77%{opacity:1;transform:translateX(0px);animation-timing-function:steps(16,end)}71.20%{opacity:1;transform:translateX(144px);animation-timing-function:step-end}73.12%,100%{opacity:0;transform:translateX(144px)}}
+  </style>
+  <rect x="0.5" y="0.5" width="899" height="935" rx="10" ry="10" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+  <path d="M 1 10 A 9 9 0 0 1 10 1 H 890 A 9 9 0 0 1 899 10 V 38 H 1 Z" fill="#161b22"/>
+  <line x1="1" y1="38" x2="899" y2="38" stroke="#30363d" stroke-width="1"/>
+  <circle cx="20" cy="19" r="6" fill="#ff5f56"/>
+  <circle cx="40" cy="19" r="6" fill="#ffbd2e"/>
+  <circle cx="60" cy="19" r="6" fill="#27c93f"/>
+  <text x="450" y="23" text-anchor="middle" class="title">baton demo</text>
+  <g transform="translate(24, 0)" clip-path="url(#screen)">
+    <text x="0" y="71" class="line cmd l0" xml:space="preserve"><tspan class="prompt">$ </tspan>python3 -m pytest -q</text>
+    <g class="mask m0"><rect x="15" y="56" width="202" height="20" fill="#0d1117"/><rect x="15" y="58" width="8" height="16" rx="1" fill="#58a6ff"/></g>
+    <text x="0" y="91" class="line out l1" xml:space="preserve"><tspan class="ok">.</tspan><tspan class="err b">F</tspan>                                                                       <tspan class="dim">[100%]</tspan></text>
+    <text x="0" y="111" class="line err b l2" xml:space="preserve">=================================== FAILURES ===================================</text>
+    <text x="0" y="131" class="line err b l3" xml:space="preserve">_________________________ test_punctuation_and_spaces __________________________</text>
+    <text x="0" y="171" class="line out l5" xml:space="preserve">    def test_punctuation_and_spaces():</text>
+    <text x="0" y="191" class="line warn l6" xml:space="preserve">&gt;       assert slugify("  Hello,   World!  ") == "hello-world"</text>
+    <text x="0" y="211" class="line err l7" xml:space="preserve">E       AssertionError: assert '--hello,---world!--' == 'hello-world'</text>
+    <text x="0" y="231" class="line err l8" xml:space="preserve">E</text>
+    <text x="0" y="251" class="line err l9" xml:space="preserve">E         - hello-world</text>
+    <text x="0" y="271" class="line err l10" xml:space="preserve">E         + --hello,---world!--</text>
+    <text x="0" y="311" class="line out l12" xml:space="preserve">tests/test_slug.py:11: <tspan class="err">AssertionError</tspan></text>
+    <text x="0" y="331" class="line dim l13" xml:space="preserve">=========================== short test summary info ============================</text>
+    <text x="0" y="351" class="line out l14" xml:space="preserve"><tspan class="err b">FAILED</tspan> tests/test_slug.py::test_punctuation_and_spaces - AssertionError: asse...</text>
+    <text x="0" y="371" class="line out l15" xml:space="preserve"><tspan class="err b">1 failed</tspan>, <tspan class="ok b">1 passed</tspan> in 0.03s</text>
+    <text x="0" y="391" class="line cmd l16" xml:space="preserve"><tspan class="prompt">$ </tspan>baton baslat demo -m "Fix slugify() in src/slug.py so tests/test_slug.py passes: strip, drop</text>
+    <g class="mask m16"><rect x="15" y="376" width="814" height="20" fill="#0d1117"/><rect x="15" y="378" width="8" height="16" rx="1" fill="#58a6ff"/></g>
+    <text x="0" y="411" class="line cmd l17" xml:space="preserve">  punctuation, collapse whitespace into single hyphens. Do not edit tests." --yaz ./src --bekle</text>
+    <g class="mask m17"><rect x="15" y="396" width="823" height="20" fill="#0d1117"/><rect x="15" y="398" width="8" height="16" rx="1" fill="#58a6ff"/></g>
+    <text x="0" y="431" class="line out l18" xml:space="preserve">[demo] <tspan class="ok b">completed</tspan> (round: 1, duration: 75.2s, written: 1 files)</text>
+    <text x="0" y="451" class="line cmd l19" xml:space="preserve"><tspan class="prompt">$ </tspan>baton rapor demo</text>
+    <g class="mask m19"><rect x="15" y="436" width="168" height="20" fill="#0d1117"/><rect x="15" y="438" width="8" height="16" rx="1" fill="#58a6ff"/></g>
+    <text x="0" y="471" class="line head b l20" xml:space="preserve">=== Task Report: demo ===</text>
+    <text x="0" y="491" class="line ok b l21" xml:space="preserve">Successful: Yes</text>
+    <text x="0" y="531" class="line head b l23" xml:space="preserve">Summary:</text>
+    <text x="0" y="551" class="line out l24" xml:space="preserve">  Updated slugify() in src/slug.py to strip whitespace, remove punctuation, and collapse runs of</text>
+    <text x="0" y="571" class="line out l25" xml:space="preserve">  whitespace/hyphens into single hyphens so tests/test_slug.py passes.</text>
+    <text x="0" y="611" class="line head b l27" xml:space="preserve">Changed / Written Files:</text>
+    <text x="0" y="631" class="line out l28" xml:space="preserve">  - …/e2e-demo/src/slug.py</text>
+    <text x="0" y="671" class="line head b l30" xml:space="preserve">Executed Tests / Commands:</text>
+    <text x="0" y="691" class="line out l31" xml:space="preserve">  - None</text>
+    <text x="0" y="731" class="line head b l33" xml:space="preserve">Open Issues:</text>
+    <text x="0" y="751" class="line out l34" xml:space="preserve">  - No shell commands were run due to 'Allowed commands (prefix): none.'; tests/test_slug.py was</text>
+    <text x="0" y="771" class="line out l35" xml:space="preserve">    verified statically.</text>
+    <text x="0" y="791" class="line cmd l36" xml:space="preserve"><tspan class="prompt">$ </tspan>python3 -m pytest -q</text>
+    <g class="mask m36"><rect x="15" y="776" width="202" height="20" fill="#0d1117"/><rect x="15" y="778" width="8" height="16" rx="1" fill="#58a6ff"/></g>
+    <text x="0" y="811" class="line out l37" xml:space="preserve"><tspan class="ok">..</tspan>                                                                       <tspan class="dim">[100%]</tspan></text>
+    <text x="0" y="831" class="line ok l38" xml:space="preserve"><tspan class="ok b">2 passed</tspan> in 0.01s</text>
+    <text x="0" y="851" class="line cmd l39" xml:space="preserve"><tspan class="prompt">$ </tspan>baton durum demo</text>
+    <g class="mask m39"><rect x="15" y="836" width="168" height="20" fill="#0d1117"/><rect x="15" y="838" width="8" height="16" rx="1" fill="#58a6ff"/></g>
+    <text x="0" y="871" class="line dim b l40" xml:space="preserve">TAG   MODEL  STATUS  VERIFY  ROUND  DURATION  LAST STEP       FILES  TOKENS</text>
+    <text x="0" y="891" class="line dim l41" xml:space="preserve">----  -----  ------  ------  -----  --------  --------------  -----  ------</text>
+    <text x="0" y="911" class="line out l42" xml:space="preserve">demo  -      <tspan class="ok b">bitti</tspan>   -       1      75.2s     agent_response  1      41611</text>
+  </g>
+</svg>

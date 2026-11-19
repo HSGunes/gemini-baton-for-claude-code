@@ -9,6 +9,10 @@ Claude görevi ve kabul ölçütlerini yazar. Gemini işi arka planda uygular, C
 
 [English README](README.md)
 
+<p align="center"><img src="assets/demo.svg" alt="Terminal demosu: baton hata veren slugify() düzeltmesini Gemini'ye devreder, ardından pytest geçer" width="900"></p>
+
+*Gerçek bir çalıştırmadan kaydedildi ([`assets/demo.txt`](assets/demo.txt); yol kırpıldı), `python3 scripts/make_demo_svg.py assets/demo.txt assets/demo.svg` ile yeniden üretilir; Gemini `src/slug.py` dosyasını düzeltti, 1 tur, 75,2 s, 41.611 token (`baton durum`).*
+
 ```text
 Sen ─▶ Claude Code            planlar, görev dosyasını yazar, senin testlerinle doğrular
          └─▶ baton:ajan-yonetici   isteğe bağlı Sonnet alt ajanı, döngünün tamamını yürütür
@@ -25,6 +29,21 @@ Sen ─▶ Claude Code            planlar, görev dosyasını yazar, senin testl
 - **Claude bağlamını şişirmez.** `rapor` kısa bir özet basar; isteğe bağlı alt ajan döngünün tamamını ana oturumun dışında tutar.
 - **Orkestratör modelleri.** agy'nin orkestratör modelleri `--orkestra` (`--orchestrate`) ile açıkça seçilebilir; hiçbir zaman otomatik varsayılan olmaz.
 - **Sıfır bağımlılık.** Tek Python 3.10+ dosyası, yalnız standart kütüphane. 65 test sahte bir `agy` ile çalışır.
+
+## Ölçülmüş maliyet
+
+Bu deponun geliştirme oturumlarından tekil ölçümler:
+
+| Görev | Gemini (`baton durum`) | Claude tarafı |
+|---|---|---|
+| Otomatik model kataloğu özelliği (model: neon) | ~420k token, 716 s | ~48k token (Sonnet yönetici alt ajanı) |
+| Orkestratör modu özelliği (`--orkestra`) | ~459k token, 485 s | ~56k token (Sonnet yönetici alt ajanı) |
+| `/baton:devret` ile uçtan uca küçük düzeltme (model: hydrogen) | ~40k token, 36 s | ölçülmedi |
+| Yukarıdaki demo (slugify düzeltmesi) | 41.611 token, 75,2 s | ölçülmedi |
+
+- Bunlar bu projenin kendi geliştirme oturumlarından alınan tekil ölçümlerdir, bir kıyaslama (benchmark) değildir; her görev farklıdır. Gemini sütunu `baton durum` token sayısıdır (girdi + çıktı; cache okumaları dahil değildir).
+- "Claude tarafı", `baton:ajan-yonetici` Sonnet alt ajanının bildirdiği toplam token sayısıdır (görevi yazma, bekleme, denetleme). Ana oturum yalnız kısa bir sonuç görür; ana oturumun kendi token'ları bu tabloda yer almaz. Son iki satırda Claude tarafı ölçülmedi.
+- Basit hesap: ilk iki görevde toplam token'ların yaklaşık %10–11'i Claude tarafında, yaklaşık %89–90'ı Gemini tarafındaydı (48/(420+48) ≈%10,3; 56/(459+56) ≈%10,9). İki sağlayıcıda token'lar aynı fiyat ya da kota birimi değildir; bu bir "para tasarrufu" iddiası değil, yalnız işin nereye kaydığının bir göstergesidir.
 
 ## Gereksinimler
 
@@ -158,7 +177,9 @@ ln -sfn "$PWD/bin/baton" ~/.local/bin/baton   # klonu doğrudan kullan
 
 Eklenti olmadan da kullanılabilir: `python3 ajan.py --help` kurulum gerektirmez; `pip install .` ise `baton` ve `ajan` komutlarını kaydeder.
 
-Issue ve pull request'ler açık. Davranış değiştiren her değişiklik için bir test ekle.
+Sosyal önizleme görseli (GitHub depo ayarlarına yüklenir, README içinde kullanılmaz) `python3 scripts/make_social_preview.py` ile yeniden üretilir (Pillow gerektirir); demo için `python3 scripts/make_demo_svg.py assets/demo.txt assets/demo.svg` çalıştırılır.
+
+Issue ve pull request'ler açık. Davranış değiştiren her değişiklik için bir test ekle. Ayrıntılar için [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Lisans
 

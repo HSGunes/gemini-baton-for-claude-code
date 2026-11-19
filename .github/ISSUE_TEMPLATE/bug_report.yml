@@ -1,0 +1,70 @@
+name: Bug report
+description: Report a bug or unexpected behavior in Gemini Baton.
+labels:
+  - bug
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands and steps needed to reproduce the issue.
+      placeholder: |
+        1. Run `baton baslat ...`
+        2. Run `baton bekle ...`
+        3. Observe the error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened, including error messages or exit codes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions (baton, agy, Python)
+      description: Include your baton version (or git commit), agy version, and Python version.
+      placeholder: |
+        - baton: 0.8.0 (or git commit)
+        - agy:
+        - Python: 3.12
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: OS name and version (Linux or macOS).
+      placeholder: e.g., Ubuntu 24.04, macOS 15
+    validations:
+      required: true
+
+  - type: textarea
+    id: baton_durum
+    attributes:
+      label: "`baton durum` output"
+      description: Paste the output of `baton durum` (or `baton durum --json`) if relevant. Remove any sensitive paths or prompts before posting.
+      render: text
+    validations:
+      required: false
