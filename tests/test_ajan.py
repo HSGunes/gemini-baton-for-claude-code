@@ -3020,4 +3020,485 @@ def test_gecersiz_model_ipucu_baton_modeller_icerir(
     assert "baton modeller" in ajan.tr("hint_invalid_model")
 
 
+# ---------------------------------------------------------------------------
+# v0.8.0 Orkestra Modu Testleri
+# ---------------------------------------------------------------------------
+def test_orkestra_takma_ad_turetme_ve_cozumleme(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """
+    Orkestratör takma adları ayrı fonksiyonda türetilmeli, neon öncelikli olmalı,
+    g1-pro için argon istisnası üretilmeli ve build_aliases/Gemini takma adları değişmemelidir.
+    """
+    # BUILTIN_MODELS hem neon hem g1-pro orkestratörlerini içerir
+    builtin_ids = [m["id"] for m in ajan.BUILTIN_MODELS]
+    assert "gemini-pro-orchestrator-neon" in builtin_ids
+    assert "gemini-pro-orchestrator-g1-pro" in builtin_ids
+
+    # 1. neon + g1-pro (g1-pro önce gelse bile orkestra -> neon, tekrarlar elenir)
+    models_both = [
+        {"id": "gemini-4-neon-xhigh", "ad": "Gemini 4 Neon (XHigh)"},
+        {"id": "gemini-3.8-flash-medium", "ad": "Gemini 3.8 Flash (Medium)"},
+        {"id": "gemini-pro-orchestrator-g1-pro", "ad": "Orchestrator (Argon)"},
+        {"id": "gemini-pro-orchestrator-neon", "ad": "Orchestrator (Neon)"},
+        {"id": "gemini-pro-orchestrator-neon", "ad": "Orchestrator (Neon Dup)"},
+        {"id": "claude-opus-5-5-high", "ad": "Claude Opus 5.5 (High)"},
+    ]
+    orchs = ajan.orchestrators(models_both)
+    assert orchs == [
+        {
+            "id": "gemini-pro-orchestrator-g1-pro",
+            "ad": "Orchestrator (Argon)",
+            "sonek": "g1-pro",
+        },
+        {
+            "id": "gemini-pro-orchestrator-neon",
+            "ad": "Orchestrator (Neon)",
+            "sonek": "neon",
+        },
+    ]
+
+    orch_aliases = ajan.build_orchestrator_aliases(models_both)
+    assert orch_aliases == {
+        "orkestra": "gemini-pro-orchestrator-neon",
+        "orchestrator": "gemini-pro-orchestrator-neon",
+        "orkestra-g1-pro": "gemini-pro-orchestrator-g1-pro",
+        "orchestrator-g1-pro": "gemini-pro-orchestrator-g1-pro",
+        "orkestra-argon": "gemini-pro-orchestrator-g1-pro",
+        "orchestrator-argon": "gemini-pro-orchestrator-g1-pro",
+        "orkestra-neon": "gemini-pro-orchestrator-neon",
+        "orchestrator-neon": "gemini-pro-orchestrator-neon",
+    }
+
+    # build_aliases hâlâ orkestra/orchestrator üretmez
+    gemini_aliases = ajan.build_aliases(models_both)
+    assert all("orchestrator" not in k and "orkestra" not in k for k in gemini_aliases)
+
+    # 2. neon yoksa (yalnız g1-pro) -> orkestra/orchestrator -> g1-pro
+    models_only_g1 = [
+        {"id": "gemini-4-neon-xhigh", "ad": "Gemini 4 Neon (XHigh)"},
+        {"id": "gemini-pro-orchestrator-g1-pro", "ad": "Orchestrator (Argon)"},
+    ]
+    aliases_g1 = ajan.build_orchestrator_aliases(models_only_g1)
+    assert aliases_g1["orkestra"] == "gemini-pro-orchestrator-g1-pro"
+    assert aliases_g1["orchestrator"] == "gemini-pro-orchestrator-g1-pro"
+    assert aliases_g1["orkestra-g1-pro"] == "gemini-pro-orchestrator-g1-pro"
+    assert aliases_g1["orkestra-argon"] == "gemini-pro-orchestrator-g1-pro"
+    assert aliases_g1["orchestrator-argon"] == "gemini-pro-orchestrator-g1-pro"
+
+    # neon yok, birden çok orkestratör -> katalogdaki ilk orkestratör seçilir
+    models_first_fallback = [
+        {"id": "gemini-pro-orchestrator-alpha", "ad": "Orchestrator (Alpha)"},
+        {"id": "gemini-pro-orchestrator-g1-pro", "ad": "Orchestrator (Argon)"},
+    ]
+    aliases_first = ajan.build_orchestrator_aliases(models_first_fallback)
+    assert aliases_first["orkestra"] == "gemini-pro-orchestrator-alpha"
+    assert aliases_first["orchestrator"] == "gemini-pro-orchestrator-alpha"
+
+    # 3. Katalog üzerinden resolve_model doğrulaması (neon + g1-pro)
+    models_file = tmp_path / "models_with_orch.txt"
+    models_file.write_text(
+        "Fetching available models...\n"
+        "gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)\n"
+        "gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\n"
+        "gemini-pro-orchestrator-neon\tOrchestrator (Neon)\n"
+        "gemini-pro-orchestrator-g1-pro\tOrchestrator (Argon)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FAKE_AGY_MODELS", str(models_file))
+    ajan._CATALOG_MEMO.clear()
+    ajan.load_catalog(refresh=True)
+
+    assert resolve_model("orkestra") == "gemini-pro-orchestrator-neon"
+    assert resolve_model("orchestrator") == "gemini-pro-orchestrator-neon"
+    assert resolve_model("orkestra-neon") == "gemini-pro-orchestrator-neon"
+    assert resolve_model("orchestrator-neon") == "gemini-pro-orchestrator-neon"
+    assert resolve_model("orkestra-g1-pro") == "gemini-pro-orchestrator-g1-pro"
+    assert resolve_model("orchestrator-g1-pro") == "gemini-pro-orchestrator-g1-pro"
+    assert resolve_model("orkestra-argon") == "gemini-pro-orchestrator-g1-pro"
+    assert resolve_model("orchestrator-argon") == "gemini-pro-orchestrator-g1-pro"
+    # Mevcut Gemini takma adları değişmez
+    assert resolve_model("neon") == "gemini-4-neon-xhigh"
+    assert resolve_model("flash-orta") == "gemini-3.8-flash-medium"
+    assert resolve_model("argon") == "gemini-4-argon-high"
+
+    # 4. Orkestratör yoksa sözlük boş ve resolve_model("orkestra") çözülmeden kalır
+    no_orch_models = [
+        {"id": "gemini-4-neon-xhigh", "ad": "Gemini 4 Neon (XHigh)"},
+        {"id": "claude-opus-5-5-high", "ad": "Claude Opus 5.5 (High)"},
+    ]
+    assert ajan.orchestrators(no_orch_models) == []
+    assert ajan.build_orchestrator_aliases(no_orch_models) == {}
+
+    no_orch_file = tmp_path / "models_no_orch.txt"
+    no_orch_file.write_text(
+        "Fetching available models...\n"
+        "gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)\n"
+        "claude-opus-5-5-high\tClaude Opus 5.5 (High)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FAKE_AGY_MODELS", str(no_orch_file))
+    ajan._CATALOG_MEMO.clear()
+    ajan.load_catalog(refresh=True)
+
+    assert resolve_model("orkestra") == "orkestra"
+    assert resolve_model("orchestrator") == "orchestrator"
+    assert resolve_model("neon") == "gemini-4-neon-xhigh"
+
+
+def test_orkestra_cli_bayraklari_ve_effort_davranisi(
+    test_env: dict[str, Any],
+) -> None:
+    """
+    --orkestra ve --orchestrate bayrakları agy'ye orkestratör modelini iletmeli,
+    --effort verilmedikçe (baslat ve devam turlarında) argv'ye --effort eklememeli,
+    açıkça verildiğinde ise iletmelidir.
+    """
+    env = dict(test_env["env"])
+    state_dir = test_env["state_dir"]
+    log_path = test_env["log_path"]
+
+    # 1. baslat --orkestra --sandbox --bekle (effort yok)
+    res1 = run_ajan(
+        [
+            "baslat",
+            "ork_gorev",
+            "-m",
+            "Orkestra görevi",
+            "--orkestra",
+            "--sandbox",
+            "--bekle",
+        ],
+        env=env,
+    )
+    assert res1.returncode == 0, res1.stderr
+
+    meta1 = json.loads(
+        (state_dir / "ork_gorev" / "meta.json").read_text(encoding="utf-8")
+    )
+    assert meta1["model"] == "orkestra"
+    assert meta1["effort"] is None
+
+    # 2. devam turunda da --effort eklenmemeli ve orkestratör modeli korunmalı
+    res2 = run_ajan(
+        ["devam", "ork_gorev", "-m", "Takip turu", "--bekle"],
+        env=env,
+    )
+    assert res2.returncode == 0, res2.stderr
+
+    # 3. --orkestra --effort high -> --effort high aktarılmalı
+    res3 = run_ajan(
+        [
+            "baslat",
+            "ork_effort_gorev",
+            "-m",
+            "Effort testi",
+            "--orkestra",
+            "--effort",
+            "high",
+            "--sandbox",
+            "--bekle",
+        ],
+        env=env,
+    )
+    assert res3.returncode == 0, res3.stderr
+
+    # 4. --orchestrate eşdeğeri (effort yok)
+    res4 = run_ajan(
+        [
+            "start",
+            "ork_en_gorev",
+            "-m",
+            "Orchestrate alias",
+            "--orchestrate",
+            "--sandbox",
+            "--wait",
+        ],
+        env=env,
+    )
+    assert res4.returncode == 0, res4.stderr
+
+    calls = [
+        json.loads(line)
+        for line in open(log_path, encoding="utf-8")
+        if line.strip()
+    ]
+    assert len(calls) == 4
+
+    argv1 = calls[0]["argv"]
+    assert argv1[argv1.index("--model") + 1] == "gemini-pro-orchestrator-neon"
+    assert "--effort" not in argv1
+    assert "--sandbox" in argv1
+
+    argv2 = calls[1]["argv"]
+    assert argv2[argv2.index("--model") + 1] == "gemini-pro-orchestrator-neon"
+    assert "--conversation" in argv2
+    assert "--effort" not in argv2
+
+    argv3 = calls[2]["argv"]
+    assert argv3[argv3.index("--model") + 1] == "gemini-pro-orchestrator-neon"
+    assert argv3[argv3.index("--effort") + 1] == "high"
+
+    argv4 = calls[3]["argv"]
+    assert argv4[argv4.index("--model") + 1] == "gemini-pro-orchestrator-neon"
+    assert "--effort" not in argv4
+
+    # Yardım çıktılarında --orkestra baslat'ta var (TR/EN), dogrula'da yok
+    res_help_tr = run_ajan(["baslat", "--help"], env=env)
+    assert res_help_tr.returncode == 0
+    assert "--orkestra" in res_help_tr.stdout
+    assert "--orchestrate" in res_help_tr.stdout
+
+    res_help_en = run_ajan(
+        ["baslat", "--help"], env=dict(env, AJAN_DIL="en")
+    )
+    assert res_help_en.returncode == 0
+    assert "--orkestra" in res_help_en.stdout
+    assert "orchestrator model" in res_help_en.stdout.lower()
+
+    res_dogrula_help = run_ajan(["dogrula", "--help"], env=env)
+    assert res_dogrula_help.returncode == 0
+    assert "--orkestra" not in res_dogrula_help.stdout
+    assert "--orchestrate" not in res_dogrula_help.stdout
+
+
+def test_orkestra_ve_model_birlikte_hata_ve_dizin_olusturmaz(
+    test_env: dict[str, Any],
+) -> None:
+    """
+    --orkestra ile --model birlikte verildiğinde görev dizini oluşturulmadan
+    TR/EN hata mesajı ile çıkış kodu 1 verilmelidir.
+    """
+    env = dict(test_env["env"])
+    state_dir = test_env["state_dir"]
+
+    # 1. Türkçe hata
+    res_tr = run_ajan(
+        [
+            "baslat",
+            "cakisan_tr",
+            "-m",
+            "test",
+            "--orkestra",
+            "--model",
+            "neon",
+        ],
+        env=env,
+    )
+    assert res_tr.returncode == 1
+    assert "Traceback" not in res_tr.stderr
+    assert len(res_tr.stderr.strip().splitlines()) == 1
+    assert ajan.MESSAGES["tr"]["err_orkestra_ve_model"] in res_tr.stderr
+    assert not (state_dir / "cakisan_tr").exists()
+
+    # 2. İngilizce hata (--orchestrate + --model)
+    env_en = dict(env, AJAN_DIL="en")
+    res_en = run_ajan(
+        [
+            "start",
+            "cakisan_en",
+            "-m",
+            "test",
+            "--orchestrate",
+            "--model",
+            "neon",
+        ],
+        env=env_en,
+    )
+    assert res_en.returncode == 1
+    assert "Traceback" not in res_en.stderr
+    assert len(res_en.stderr.strip().splitlines()) == 1
+    assert ajan.MESSAGES["en"]["err_orkestra_ve_model"] in res_en.stderr
+    assert not (state_dir / "cakisan_en").exists()
+
+
+def test_modeller_orkestrator_metin_ve_json(
+    test_env: dict[str, Any], tmp_path: Any
+) -> None:
+    """
+    modeller metin çıktısı ayrı 'Orkestratör:' / 'Orchestrators:' bölümü göstermeli,
+    orkestratörleri 'Diğer Gemini modelleri'nden çıkarmalı; --json 'orkestra' anahtarını
+    eklerken mevcut anahtarları korumalı; orkestratörsüz katalogda bölüm basılmamalıdır.
+    """
+    rich_models = tmp_path / "models_rich.txt"
+    rich_models.write_text(
+        "Fetching available models...\n"
+        "gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)\n"
+        "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n"
+        "gemini-pro-orchestrator-neon\tOrchestrator (Neon)\n"
+        "gemini-pro-orchestrator-g1-pro\tOrchestrator (Argon)\n"
+        "gemini-2.5-pro-preview\tGemini 2.5 Pro Preview\n"
+        "claude-opus-5-5-high\tClaude Opus 5.5 (High)\n",
+        encoding="utf-8",
+    )
+    env = dict(test_env["env"], FAKE_AGY_MODELS=str(rich_models))
+
+    # 1. Metin çıktısı (TR)
+    res_tr = run_ajan(["modeller"], env=env)
+    assert res_tr.returncode == 0, res_tr.stderr
+    out_tr = res_tr.stdout
+    assert "Varsayılan: gemini-4-neon-xhigh (neon)" in out_tr
+    assert "Orkestratör:" in out_tr
+    assert out_tr.index("Gemini aileleri:") < out_tr.index("Orkestratör:")
+    assert (
+        "  gemini-pro-orchestrator-neon  (Orchestrator (Neon))  "
+        "[orkestra, orchestrator, orkestra-neon, orchestrator-neon]"
+    ) in out_tr
+    assert (
+        "  gemini-pro-orchestrator-g1-pro  (Orchestrator (Argon))  "
+        "[orkestra-g1-pro, orchestrator-g1-pro, orkestra-argon, orchestrator-argon]"
+    ) in out_tr
+
+    # Diğer Gemini modelleri altında orkestratör olmamalı, gemini-2.5-pro-preview olmalı
+    assert "Diğer Gemini modelleri" in out_tr
+    other_part = out_tr.split("Diğer Gemini modelleri", 1)[1]
+    assert "gemini-2.5-pro-preview" in other_part
+    assert "gemini-pro-orchestrator-neon" not in other_part
+    assert "gemini-pro-orchestrator-g1-pro" not in other_part
+
+    # 2. Metin çıktısı (EN)
+    env_en = dict(env, AJAN_DIL="en")
+    res_en = run_ajan(["models"], env=env_en)
+    assert res_en.returncode == 0, res_en.stderr
+    assert "Orchestrators:" in res_en.stdout
+    assert "Orkestratör:" not in res_en.stdout
+    other_part_en = res_en.stdout.split("Other Gemini models", 1)[1]
+    assert "gemini-pro-orchestrator-neon" not in other_part_en
+    assert "gemini-pro-orchestrator-g1-pro" not in other_part_en
+
+    # 3. JSON çıktısı: mevcut anahtarlar korunmuş + yeni 'orkestra' anahtarı
+    res_json = run_ajan(["modeller", "--json"], env=env)
+    assert res_json.returncode == 0, res_json.stderr
+    data = json.loads(res_json.stdout)
+    assert data["varsayilan"] == "gemini-4-neon-xhigh"
+    assert data["varsayilan_aile"] == "neon"
+    assert all(
+        "orchestrator" not in k and "orkestra" not in k
+        for k in data["takma_adlar"]
+    )
+    assert len(data["modeller"]) == 6
+    assert data["orkestra"]["takma_adlar"] == {
+        "orkestra": "gemini-pro-orchestrator-neon",
+        "orchestrator": "gemini-pro-orchestrator-neon",
+        "orkestra-neon": "gemini-pro-orchestrator-neon",
+        "orchestrator-neon": "gemini-pro-orchestrator-neon",
+        "orkestra-g1-pro": "gemini-pro-orchestrator-g1-pro",
+        "orchestrator-g1-pro": "gemini-pro-orchestrator-g1-pro",
+        "orkestra-argon": "gemini-pro-orchestrator-g1-pro",
+        "orchestrator-argon": "gemini-pro-orchestrator-g1-pro",
+    }
+    assert data["orkestra"]["modeller"] == [
+        {
+            "id": "gemini-pro-orchestrator-neon",
+            "ad": "Orchestrator (Neon)",
+            "sonek": "neon",
+            "takma_adlar": [
+                "orkestra",
+                "orchestrator",
+                "orkestra-neon",
+                "orchestrator-neon",
+            ],
+        },
+        {
+            "id": "gemini-pro-orchestrator-g1-pro",
+            "ad": "Orchestrator (Argon)",
+            "sonek": "g1-pro",
+            "takma_adlar": [
+                "orkestra-g1-pro",
+                "orchestrator-g1-pro",
+                "orkestra-argon",
+                "orchestrator-argon",
+            ],
+        },
+    ]
+
+    # 4. Orkestratörsüz katalog: bölüm basılmaz, JSON 'orkestra' anahtarı boş döner
+    no_orch_models = tmp_path / "models_without_orch.txt"
+    no_orch_models.write_text(
+        "Fetching available models...\n"
+        "gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)\n"
+        "claude-opus-5-5-high\tClaude Opus 5.5 (High)\n",
+        encoding="utf-8",
+    )
+    env_no_orch = dict(test_env["env"], FAKE_AGY_MODELS=str(no_orch_models))
+
+    res_no_txt = run_ajan(["modeller", "--yenile"], env=env_no_orch)
+    assert res_no_txt.returncode == 0, res_no_txt.stderr
+    assert "Orkestratör:" not in res_no_txt.stdout
+    assert "Orchestrators:" not in res_no_txt.stdout
+
+    res_no_en = run_ajan(
+        ["models"], env=dict(env_no_orch, AJAN_DIL="en")
+    )
+    assert res_no_en.returncode == 0, res_no_en.stderr
+    assert "Orchestrators:" not in res_no_en.stdout
+
+    res_no_json = run_ajan(["modeller", "--json"], env=env_no_orch)
+    assert res_no_json.returncode == 0, res_no_json.stderr
+    data_no = json.loads(res_no_json.stdout)
+    assert data_no["orkestra"] == {"takma_adlar": {}, "modeller": []}
+
+
+def test_orkestrator_varsayilan_olmaz_ve_yeni_aile_bildirimi_tetiklemez(
+    test_env: dict[str, Any], tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Orkestratörler asla otomatik varsayılan seçilmemeli (tercih edilen aileler yoksa bile
+    DEFAULT_MODEL'e düşmeli) ve kataloga yalnız yeni orkestratör eklendiğinde aile bildirimi
+    tetiklenmemelidir.
+    """
+    # 1. Katalogda neon + orkestratör -> varsayılan neon kalır
+    with_neon = [
+        {"id": "gemini-pro-orchestrator-neon", "ad": "Orchestrator (Neon)"},
+        {"id": "gemini-pro-orchestrator-g1-pro", "ad": "Orchestrator (Argon)"},
+        {"id": "gemini-4-neon-xhigh", "ad": "Gemini 4 Neon (XHigh)"},
+    ]
+    assert ajan.default_model(with_neon) == "gemini-4-neon-xhigh"
+
+    # 2. Yalnız orkestratörler (neon/hydrogen/argon/flash yok) -> DEFAULT_MODEL'e düşer
+    only_orch = [
+        {"id": "gemini-pro-orchestrator-neon", "ad": "Orchestrator (Neon)"},
+        {"id": "gemini-pro-orchestrator-g1-pro", "ad": "Orchestrator (Argon)"},
+    ]
+    assert ajan.default_model(only_orch) == DEFAULT_MODEL
+
+    # 3. Kullanıcı açıkça AJAN_MODEL=orkestra verirse orkestratör seçilir
+    monkeypatch.setenv("AJAN_MODEL", "orkestra")
+    assert ajan.default_model(only_orch) == "gemini-pro-orchestrator-neon"
+    monkeypatch.delenv("AJAN_MODEL", raising=False)
+
+    # 4. İlk önbellek sonrası kataloga yalnız yeni bir orkestratör eklendiğinde stderr sessiz
+    base_models = tmp_path / "models_orch_base.txt"
+    base_models.write_text(
+        "Fetching available models...\n"
+        "gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)\n"
+        "gemini-pro-orchestrator-neon\tOrchestrator (Neon)\n",
+        encoding="utf-8",
+    )
+    env_base = dict(test_env["env"], FAKE_AGY_MODELS=str(base_models))
+    res_init = run_ajan(["modeller", "--json"], env=env_base)
+    assert res_init.returncode == 0, res_init.stderr
+    assert res_init.stderr.strip() == ""
+
+    with_new_orch = tmp_path / "models_orch_added.txt"
+    with_new_orch.write_text(
+        base_models.read_text(encoding="utf-8")
+        + "gemini-pro-orchestrator-g1-pro\tOrchestrator (Argon)\n"
+        + "gemini-pro-orchestrator-beta\tOrchestrator (Beta)\n",
+        encoding="utf-8",
+    )
+    env_added = dict(test_env["env"], FAKE_AGY_MODELS=str(with_new_orch))
+    res_refresh = run_ajan(["modeller", "--yenile", "--json"], env=env_added)
+    assert res_refresh.returncode == 0, res_refresh.stderr
+    assert res_refresh.stderr.strip() == ""
+    data_ref = json.loads(res_refresh.stdout)
+    assert data_ref["varsayilan"] == "gemini-4-neon-xhigh"
+    assert (
+        data_ref["orkestra"]["takma_adlar"]["orkestra-g1-pro"]
+        == "gemini-pro-orchestrator-g1-pro"
+    )
+    assert (
+        data_ref["orkestra"]["takma_adlar"]["orkestra-beta"]
+        == "gemini-pro-orchestrator-beta"
+    )
 

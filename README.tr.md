@@ -23,7 +23,8 @@ Sen ─▶ Claude Code            planlar, görev dosyasını yazar, senin testl
 - **Dar yazma izni.** Gemini yalnız `--yaz` ile verilen dizinlere yazabilir. Eksik izin kuralı olursa görev, token harcanmadan çıkış 2 ile durur.
 - **Varsayılan sandbox.** `--komut` verilmezse terminal kapalıdır (`--sandbox`).
 - **Claude bağlamını şişirmez.** `rapor` kısa bir özet basar; isteğe bağlı alt ajan döngünün tamamını ana oturumun dışında tutar.
-- **Sıfır bağımlılık.** Tek Python 3.10+ dosyası, yalnız standart kütüphane. 60 test sahte bir `agy` ile çalışır.
+- **Orkestratör modelleri.** agy'nin orkestratör modelleri `--orkestra` (`--orchestrate`) ile açıkça seçilebilir; hiçbir zaman otomatik varsayılan olmaz.
+- **Sıfır bağımlılık.** Tek Python 3.10+ dosyası, yalnız standart kütüphane. 65 test sahte bir `agy` ile çalışır.
 
 ## Gereksinimler
 
@@ -94,7 +95,7 @@ Uzun işlerde bağlamı Markdown dosyalarına yazıp `-g` ile ver (`-g A -g B` v
 
 | Komut | Seçenekler |
 |---|---|
-| `baslat <etiket>` | `-g DOSYA...` ya da `-m METİN`, `--model`, `--effort`, `--yaz DİZİN`, `--oku DİZİN`, `--komut ÖNEK`, `--sure 30m`, `--sandbox`, `--izin-ekle`, `--bekle` |
+| `baslat <etiket>` | `-g DOSYA...` ya da `-m METİN`, `--model`, `--orkestra` (`--orchestrate`), `--effort`, `--yaz DİZİN`, `--oku DİZİN`, `--komut ÖNEK`, `--sure 30m`, `--sandbox`, `--izin-ekle`, `--bekle` |
 | `bekle [<etiket>...]` | `--zaman-asimi SANİYE` |
 | `durum [<etiket>]` | `--json` |
 | `rapor <etiket>` | `--ham` (ham yanıt) |
@@ -108,7 +109,7 @@ Uzun işlerde bağlamı Markdown dosyalarına yazıp `-g` ile ver (`-g A -g B` v
 
 Görev etiketleri (`<etiket>`) yalnız `[A-Za-z0-9._-]` karakterlerinden oluşabilir ve 1–64 karakter uzunluğunda olmalıdır.
 
-Model takma adları `agy models` kataloğundan dinamik olarak türetilir (`<aile>`, `<aile>-high`, `<aile>-orta`, `<aile>-low`; tam model kimliği de verilebilir). Varsayılan model otomatik belirlenir: hesapta mevcut olan ilk aile tercih sırasıyla (`neon` → `hydrogen` → `argon` → `flash`) seçilir; `AJAN_MODEL` ya da `--model` ile değiştirilebilir. Kullanılabilir aileleri ve takma adları görmek için `baton modeller` çalıştırılır. Katalog 24 saat önbelleklenir; yenilemede yeni bir Gemini ailesi görülürse stderr'e tek satır bilgi yazılır.
+Model takma adları `agy models` kataloğundan dinamik olarak türetilir (`<aile>`, `<aile>-high`, `<aile>-orta`, `<aile>-low`; tam model kimliği de verilebilir). Varsayılan model otomatik belirlenir: hesapta mevcut olan ilk aile tercih sırasıyla (`neon` → `hydrogen` → `argon` → `flash`) seçilir; `AJAN_MODEL` ya da `--model` ile değiştirilebilir. Kullanılabilir aileleri ve takma adları görmek için `baton modeller` çalıştırılır. Katalog 24 saat önbelleklenir; yenilemede yeni bir Gemini ailesi görülürse stderr'e tek satır bilgi yazılır. Katalogda orkestratör modelleri varsa `orkestra` / `orchestrator` (tercihen `neon`, yoksa ilk orkestratör) ve `orkestra-<ek>` / `orchestrator-<ek>` (ör. `orkestra-g1-pro`, `orkestra-argon`) takma adları da türetilir; bunlar hiçbir zaman otomatik varsayılan değildir. `--orkestra` (`--orchestrate`), `--model orkestra` eşdeğeridir ve `--model` ile birlikte verilemez.
 
 ## Yapılandırma
 
@@ -136,6 +137,7 @@ Model takma adları `agy models` kataloğundan dinamik olarak türetilir (`<aile
 - Mekanik işlerde `--model flash-orta` kullan; daha az thinking token harcar.
 - Claude tarafında `izle` ya da `rapor --ham` yerine `rapor` kullan.
 - `agy`, global olarak etkin MCP sunucularını ve tüm araç setini her göreve yükler; bunu hesaba kat.
+- `--orkestra` seçeneğini büyük, çok parçalı işler için kullan; orkestratör modeller daha fazla kota harcayabilir (ölçülmedi).
 
 ## Sınırlamalar
 

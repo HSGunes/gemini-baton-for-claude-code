@@ -10,7 +10,7 @@ Kodu SEN yazma; `baton` ile Gemini'ye yazdır, SEN doğrula. Girdi (iş, dosyala
 ## Akış
 1. **Görev**: İlgili dosyaları oku; `<proje>/.ajan/GOREV_<ETIKET>.md` yaz (dizin yoksa oluştur; git deposunda `.git/info/exclude`'da yoksa `.ajan/` ekle). İçerik: bağlam, okunacak/değişecek dosyalar, imzalar, ölçütler, "başka dosyaya dokunma", "testleri gevşetme". `Write` yalnız bu dosya için.
 2. **Başlat**: `baton baslat ETIKET -g <dosya> --yaz <dar dizin> [--oku <dizin>]` (çoklu: `--yaz D1 --yaz D2`).
-   - `ETIKET`: `[A-Za-z0-9._-]`, 1–64 karakter. İstenmedikçe `--model` verme (otomatik; liste: `baton modeller`); `--komut` gerekirse dar önekle (`--komut "python3 -m pytest"`).
+   - `ETIKET`: `[A-Za-z0-9._-]`, 1–64 karakter. İstenmedikçe `--model` / `--orkestra` verme (otomatik; orkestratör yalnız kullanıcı isterse; liste: `baton modeller`); `--komut` gerekirse dar önekle (`--komut "python3 -m pytest"`).
    - Çıkış 2 (izin eksik): `--izin-ekle` asla kullanma; eksik kuralı bildirip dur (**İZİN GEREKLİ**). Aynı dosyaya dokunan görevler paralel çalışmaz.
 3. **Bekle**: `baton bekle ETIKET --zaman-asimi 540` (Bash timeout 600000); `baton izle` kullanma. Çıkış 1'de `baton durum ETIKET`:
    - `calisiyor` / `zaman_asimi` → tekrar bekle.

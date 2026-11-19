@@ -13,6 +13,7 @@ Ana bağlamı korumak için `baton:ajan-yonetici` (veya `/baton:devret <iş>`) k
 - Varsayılan otomatik (kullanıcı istemedikçe `--model` verme); mevcut liste için `baton modeller`.
 - Kullanıcı yeni/belirli model isterse `--model <aile|tam-kimlik>`; basit/mekanik işler için `--model flash-orta`.
 - Varsayılan model kotada veya geçersizse `baton modeller` ile başka bir aile seç.
+- Büyük, çok parçalı işte kullanıcı isterse `--orkestra` kullan (varsayılan değildir).
 
 ## Akış
 1. **Görev** (`GOREV_X.md`, kısa/kesin): okunacak/değişecek dosyalar (adıyla), imzalar, davranış, kabul ölçütleri, test beklentisi, "başka dosyaya dokunma", varsa teşhis. Ortak bağlam: `-g ORTAK.md -g GOREV_X.md` (ör. `examples/GOREV_ORNEK.md`).

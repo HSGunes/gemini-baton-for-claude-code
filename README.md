@@ -23,7 +23,8 @@ You ─▶ Claude Code            plans, writes the task file, verifies with you
 - **Narrow write access.** Gemini may only write to the `--yaz` directories. Missing rules stop the run with exit code 2 before any tokens are spent.
 - **Sandboxed by default.** With no `--komut` prefixes the terminal is disabled (`--sandbox`).
 - **Context-friendly for Claude.** `rapor` prints a compact summary, and the optional subagent keeps the whole loop out of your main session.
-- **Zero dependencies.** A single Python 3.10+ file using only the standard library, with 60 tests that run against a fake `agy`.
+- **Orchestrator models.** agy's orchestrator models can be selected explicitly with `--orkestra` (`--orchestrate`); they are never selected automatically as the default.
+- **Zero dependencies.** A single Python 3.10+ file using only the standard library, with 65 tests that run against a fake `agy`.
 
 ## Requirements
 
@@ -104,7 +105,7 @@ Subcommands are Turkish. The English meaning is in the second column.
 
 | Command | Meaning | Key options |
 |---|---|---|
-| `baslat <tag>` | start | `-g FILE...` or `-m TEXT`, `--model`, `--effort`, `--yaz DIR`, `--oku DIR`, `--komut PREFIX`, `--sure 30m`, `--sandbox`, `--izin-ekle`, `--bekle` |
+| `baslat <tag>` | start | `-g FILE...` or `-m TEXT`, `--model`, `--orkestra` (`--orchestrate`), `--effort`, `--yaz DIR`, `--oku DIR`, `--komut PREFIX`, `--sure 30m`, `--sandbox`, `--izin-ekle`, `--bekle` |
 | `bekle [<tag>...]` | wait | `--zaman-asimi SECONDS` |
 | `durum [<tag>]` | status | `--json` |
 | `rapor <tag>` | report | `--ham` (raw response) |
@@ -118,7 +119,7 @@ Subcommands are Turkish. The English meaning is in the second column.
 
 Task tags (`<tag>`) may only contain `[A-Za-z0-9._-]` and must be 1–64 characters long.
 
-Model aliases are derived dynamically from the `agy models` catalog (`<family>`, `<family>-high`, `<family>-orta`, `<family>-low`, plus any full model ID). The default model is selected automatically from the first available family on your account in preference order (`neon` → `hydrogen` → `argon` → `flash`), and can be overridden with `AJAN_MODEL` or `--model`. Run `baton modeller` to inspect available families and aliases. The catalog is cached for 24 hours; when a new Gemini family appears on refresh, a single-line notice is printed to stderr.
+Model aliases are derived dynamically from the `agy models` catalog (`<family>`, `<family>-high`, `<family>-orta`, `<family>-low`, plus any full model ID). The default model is selected automatically from the first available family on your account in preference order (`neon` → `hydrogen` → `argon` → `flash`), and can be overridden with `AJAN_MODEL` or `--model`. Run `baton modeller` to inspect available families and aliases. The catalog is cached for 24 hours; when a new Gemini family appears on refresh, a single-line notice is printed to stderr. If orchestrator models exist in the catalog, `orkestra` / `orchestrator` (preferring the `neon` orchestrator, otherwise the first listed) and `orkestra-<suffix>` / `orchestrator-<suffix>` aliases (e.g. `orkestra-g1-pro`, `orkestra-argon`) are also derived; they are never chosen automatically as the default. `--orkestra` (`--orchestrate`) is shorthand for `--model orkestra` and cannot be combined with `--model`.
 
 ## Configuration
 
@@ -146,6 +147,7 @@ Model aliases are derived dynamically from the `agy models` catalog (`<family>`,
 - Use `--model flash-orta` for mechanical tasks. It spends fewer thinking tokens.
 - On the Claude side, prefer `rapor` over `izle` or `rapor --ham`.
 - Note that `agy` loads your globally enabled MCP servers and its full tool set into every task.
+- Reserve `--orkestra` for large, multi-part tasks; orchestrator models may consume more quota (not measured).
 
 ## Limitations
 

@@ -56,6 +56,7 @@ BUILTIN_MODELS: list[dict[str, str]] = [
     {"id": "gemini-3.8-flash-high", "ad": "Gemini 3.8 Flash (High)"},
     {"id": "gemini-3.8-flash-medium", "ad": "Gemini 3.8 Flash (Medium)"},
     {"id": "gemini-pro-orchestrator-neon", "ad": "Orchestrator (Neon)"},
+    {"id": "gemini-pro-orchestrator-g1-pro", "ad": "Orchestrator (Argon)"},
 ]
 
 MODELS_CACHE_FILENAME = "models_cache.json"
@@ -67,6 +68,7 @@ MODEL_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 GEMINI_MODEL_RE = re.compile(
     r"^gemini-(\d+(?:\.\d+)*)-([a-z][a-z0-9]*)-(xhigh|high|medium|low)$"
 )
+ORCHESTRATOR_RE = re.compile(r"^gemini-pro-orchestrator-([a-z0-9][a-z0-9.-]*)$")
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 ETIKET_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
@@ -96,6 +98,7 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "err_task_file_unreadable": "Hata: Görev dosyası okunamadı: {fpath} ({err})",
         "err_agy_not_found": "Hata: agy bulunamadı: {agy}. Antigravity CLI kurulu mu / PATH'te mi? Alternatif: AJAN_AGY ortam değişkeni.",
         "err_task_input_required": "Hata: Görev için -g/--gorev-dosyalari veya -m/--mesaj gereklidir.",
+        "err_orkestra_ve_model": "Hata: --orkestra ve --model birlikte kullanılamaz. Belirli bir orkestratör için --model orkestra-<ek> kullanın.",
         "err_task_running": "Hata: '{etiket}' etiketli görev şu anda canlı çalışıyor (PID: {pid}).",
         "err_task_not_running": "Hata: '{etiket}' etiketli görev çalışmıyor (durum: {durum}).",
         "err_invalid_etiket": "Hata: Geçersiz görev etiketi: '{etiket}'. Yalnız [A-Za-z0-9._-] karakterleri (1-64) kullanın; '.' veya '..' olamaz.",
@@ -145,6 +148,7 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "models_source_yerlesik": "yerleşik",
         "models_header": "Kaynak: {kaynak} ({adet} model) | Varsayılan: {varsayilan}",
         "models_gemini_families": "Gemini aileleri:",
+        "models_orchestrators": "Orkestratör:",
         "models_default_tag": "(varsayılan)",
         "models_other_gemini": "Diğer Gemini modelleri (tam kimlikle kullanılır):",
         "models_non_gemini": "Gemini dışı modeller ({adet}; tam kimlikle kullanılır):",
@@ -186,6 +190,7 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "help_arg_gorev_dosyalari": "Görev metnini içeren dosyalar",
         "help_arg_mesaj": "Görev metni",
         "help_arg_model": "Model: takma ad (ör. neon, hydrogen, flash-orta; liste: baton modeller) veya tam kimlik. Varsayılan: otomatik",
+        "help_arg_orkestra": "Orkestratör modeli kullan (--model orkestra eşdeğeri; --model ile birlikte verilemez)",
         "help_arg_yenile": "Model önbelleğini yok sayarak agy üzerinden zorla yenile",
         "help_arg_effort": "Düşünme eforu",
         "help_arg_yaz": "Yazma izni verilecek dizin (--add-dir eklenir)",
@@ -214,6 +219,7 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "err_task_file_unreadable": "Error: Could not read task file: {fpath} ({err})",
         "err_agy_not_found": "Error: agy not found: {agy}. Is Antigravity CLI installed and in PATH? Alternative: AJAN_AGY environment variable.",
         "err_task_input_required": "Error: Either -g/--gorev-dosyalari or -m/--mesaj is required for task.",
+        "err_orkestra_ve_model": "Error: --orkestra and --model cannot be used together. For a specific orchestrator, use --model orkestra-<suffix>.",
         "err_task_running": "Error: Task '{etiket}' is currently running (PID: {pid}).",
         "err_task_not_running": "Error: Task '{etiket}' is not running (status: {durum}).",
         "err_invalid_etiket": "Error: Invalid task tag: '{etiket}'. Only [A-Za-z0-9._-] characters (1-64) allowed; cannot be '.' or '..'.",
@@ -263,6 +269,7 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "models_source_yerlesik": "builtin",
         "models_header": "Source: {kaynak} ({adet} models) | Default: {varsayilan}",
         "models_gemini_families": "Gemini families:",
+        "models_orchestrators": "Orchestrators:",
         "models_default_tag": "(default)",
         "models_other_gemini": "Other Gemini models (use full ID):",
         "models_non_gemini": "Non-Gemini models ({adet}; use full ID):",
@@ -304,6 +311,7 @@ MESSAGES: dict[str, dict[str, Any]] = {
         "help_arg_gorev_dosyalari": "Files containing the task description",
         "help_arg_mesaj": "Task description text",
         "help_arg_model": "Model: alias (e.g. neon, hydrogen, flash-orta; list: baton models) or full ID. Default: automatic",
+        "help_arg_orkestra": "Use the orchestrator model (equivalent to --model orkestra; cannot be combined with --model)",
         "help_arg_yenile": "Bypass cache and force refresh from agy",
         "help_arg_effort": "Thinking effort level",
         "help_arg_yaz": "Directory with write permission (added via --add-dir)",
@@ -484,6 +492,55 @@ def build_aliases(models: list[dict[str, str]]) -> dict[str, str]:
     return aliases
 
 
+def orchestrators(models: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Katalogdaki orkestratör modellerini sırayı koruyarak ve tekrarsız döner."""
+    seen: set[str] = set()
+    result: list[dict[str, str]] = []
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        mid = item.get("id", "")
+        if not isinstance(mid, str):
+            continue
+        match = ORCHESTRATOR_RE.fullmatch(mid)
+        if not match or mid in seen:
+            continue
+        seen.add(mid)
+        ad = item.get("ad", "")
+        result.append(
+            {
+                "id": mid,
+                "ad": ad if isinstance(ad, str) else "",
+                "sonek": match.group(1),
+            }
+        )
+    return result
+
+
+def build_orchestrator_aliases(models: list[dict[str, str]]) -> dict[str, str]:
+    """Katalogdaki orkestratör modelleri için takma ad sözlüğü üretir."""
+    orchs = orchestrators(models)
+    if not orchs:
+        return {}
+    default_orch = next(
+        (o for o in orchs if o["sonek"] == "neon"),
+        orchs[0],
+    )
+    aliases: dict[str, str] = {
+        "orkestra": default_orch["id"],
+        "orchestrator": default_orch["id"],
+    }
+    for orch in orchs:
+        sonek = orch["sonek"]
+        mid = orch["id"]
+        aliases[f"orkestra-{sonek}"] = mid
+        aliases[f"orchestrator-{sonek}"] = mid
+        if sonek == "g1-pro":
+            aliases.setdefault("orkestra-argon", mid)
+            aliases.setdefault("orchestrator-argon", mid)
+    return aliases
+
+
 def _read_models_cache(cache_path: str) -> dict[str, Any] | None:
     """Önbellek dosyasını okur; yoksa veya bozuksa None döner."""
     if not os.path.isfile(cache_path):
@@ -628,6 +685,9 @@ def resolve_alias(
         return LEGACY_ALIASES[cleaned]
     if models is None:
         models = load_catalog()["models"]
+    orch_aliases = build_orchestrator_aliases(models)
+    if cleaned in orch_aliases:
+        return orch_aliases[cleaned]
     dynamic = build_aliases(models)
     if cleaned in LEGACY_ALIASES:
         legacy_target = LEGACY_ALIASES[cleaned]
@@ -1556,6 +1616,11 @@ def cmd_baslat(args: argparse.Namespace) -> None:
     etiket = args.etiket
     state_root = get_state_root()
     task_dir = require_task_dir(etiket, state_root)
+    if getattr(args, "orkestra", False):
+        if args.model is not None:
+            print(tr("err_orkestra_ve_model"), file=sys.stderr)
+            sys.exit(1)
+        args.model = "orkestra"
     if not _require_agy_binary():
         sys.exit(1)
     settings_path = get_settings_path()
@@ -2475,6 +2540,11 @@ def cmd_modeller(args: argparse.Namespace) -> None:
 
     fams = families(models)
     aliases = build_aliases(models)
+    orchs = orchestrators(models)
+    orch_aliases = build_orchestrator_aliases(models)
+    orch_aliases_by_id: dict[str, list[str]] = {}
+    for alias_name, target_id in orch_aliases.items():
+        orch_aliases_by_id.setdefault(target_id, []).append(alias_name)
     varsayilan_id = default_model(models=models)
     m_def = GEMINI_MODEL_RE.fullmatch(varsayilan_id)
     varsayilan_aile = m_def.group(2) if m_def else None
@@ -2491,12 +2561,25 @@ def cmd_modeller(args: argparse.Namespace) -> None:
                 "surum": ".".join(str(x) for x in info["surum"]),
                 "seviyeler": dict(info["seviyeler"]),
             }
+        orkestra_json = {
+            "takma_adlar": orch_aliases,
+            "modeller": [
+                {
+                    "id": o["id"],
+                    "ad": o["ad"],
+                    "sonek": o["sonek"],
+                    "takma_adlar": list(orch_aliases_by_id.get(o["id"], [])),
+                }
+                for o in orchs
+            ],
+        }
         payload = {
             "kaynak": kaynak,
             "varsayilan": varsayilan_id,
             "varsayilan_aile": varsayilan_aile,
             "takma_adlar": aliases,
             "aileler": aileler_json,
+            "orkestra": orkestra_json,
             "modeller": models,
         }
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -2544,11 +2627,26 @@ def cmd_modeller(args: argparse.Namespace) -> None:
     else:
         print(tr("models_none_gemini"))
 
+    orch_ids = {o["id"] for o in orchs}
+    if orchs:
+        print()
+        print(tr("models_orchestrators"))
+        for o in orchs:
+            al_list = orch_aliases_by_id.get(o["id"], [])
+            al_str = f"  [{', '.join(al_list)}]" if al_list else ""
+            mark = (
+                f" * {tr('models_default_tag')}"
+                if o["id"] == varsayilan_id
+                else ""
+            )
+            print(f"  {o['id']}  ({o['ad']}){al_str}{mark}")
+
     other_gemini = [
         m
         for m in models
         if m["id"].startswith("gemini-")
         and not GEMINI_MODEL_RE.fullmatch(m["id"])
+        and m["id"] not in orch_ids
     ]
     if other_gemini:
         print()
@@ -2605,6 +2703,13 @@ def main() -> None:
         "--model",
         default=None,
         help=tr("help_arg_model"),
+    )
+    p_baslat.add_argument(
+        "--orkestra",
+        "--orchestrate",
+        dest="orkestra",
+        action="store_true",
+        help=tr("help_arg_orkestra"),
     )
     p_baslat.add_argument(
         "--effort",
