@@ -3,7 +3,7 @@ description: Bir uygulama işini Gemini alt ajanına devret (ajan); Claude doğr
 argument-hint: <yapılacak iş, ilgili dosyalar, doğrulama komutu>
 ---
 
-Şu işi `baton:ajan-yonetici` alt ajanına devret:
+Şu işi `gemini-baton:ajan-yonetici` alt ajanına devret:
 
 $ARGUMENTS
 

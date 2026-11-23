@@ -15,7 +15,7 @@ Claude görevi ve kabul ölçütlerini yazar. Gemini işi arka planda uygular, C
 
 ```text
 Sen ─▶ Claude Code            planlar, görev dosyasını yazar, senin testlerinle doğrular
-         └─▶ baton:ajan-yonetici   isteğe bağlı Sonnet alt ajanı, döngünün tamamını yürütür
+         └─▶ gemini-baton:ajan-yonetici   isteğe bağlı Sonnet alt ajanı, döngünün tamamını yürütür
                └─▶ baton CLI ─▶ agy ─▶ Gemini   arka planda uygular
 ```
 
@@ -38,11 +38,11 @@ Bu deponun geliştirme oturumlarından tekil ölçümler:
 |---|---|---|
 | Otomatik model kataloğu özelliği (model: neon) | ~420k token, 716 s | ~48k token (Sonnet yönetici alt ajanı) |
 | Orkestratör modu özelliği (`--orkestra`) | ~459k token, 485 s | ~56k token (Sonnet yönetici alt ajanı) |
-| `/baton:devret` ile uçtan uca küçük düzeltme (model: hydrogen) | ~40k token, 36 s | ölçülmedi |
+| `/gemini-baton:devret` ile uçtan uca küçük düzeltme (model: hydrogen) | ~40k token, 36 s | ölçülmedi |
 | Yukarıdaki demo (slugify düzeltmesi) | 41.611 token, 75,2 s | ölçülmedi |
 
 - Bunlar bu projenin kendi geliştirme oturumlarından alınan tekil ölçümlerdir, bir kıyaslama (benchmark) değildir; her görev farklıdır. Gemini sütunu `baton durum` token sayısıdır (girdi + çıktı; cache okumaları dahil değildir).
-- "Claude tarafı", `baton:ajan-yonetici` Sonnet alt ajanının bildirdiği toplam token sayısıdır (görevi yazma, bekleme, denetleme). Ana oturum yalnız kısa bir sonuç görür; ana oturumun kendi token'ları bu tabloda yer almaz. Son iki satırda Claude tarafı ölçülmedi.
+- "Claude tarafı", `gemini-baton:ajan-yonetici` Sonnet alt ajanının bildirdiği toplam token sayısıdır (görevi yazma, bekleme, denetleme). Ana oturum yalnız kısa bir sonuç görür; ana oturumun kendi token'ları bu tabloda yer almaz. Son iki satırda Claude tarafı ölçülmedi.
 - Basit hesap: ilk iki görevde toplam token'ların yaklaşık %10–11'i Claude tarafında, yaklaşık %89–90'ı Gemini tarafındaydı (48/(420+48) ≈%10,3; 56/(459+56) ≈%10,9). İki sağlayıcıda token'lar aynı fiyat ya da kota birimi değildir; bu bir "para tasarrufu" iddiası değil, yalnız işin nereye kaydığının bir göstergesidir.
 
 ## Gereksinimler
@@ -56,13 +56,12 @@ Bu deponun geliştirme oturumlarından tekil ölçümler:
 
 ```bash
 claude plugin marketplace add HSGunes/gemini-baton-for-claude-code
-claude plugin install baton@gemini-baton
-mkdir -p ~/.local/bin
-ln -sfn "$(ls -d ~/.claude/plugins/cache/gemini-baton/baton/* | sort -V | tail -1)/bin/baton" ~/.local/bin/baton
+claude plugin install gemini-baton@gemini-baton
+pipx install git+https://github.com/HSGunes/gemini-baton-for-claude-code
 baton --help
 ```
 
-`ln` adımı gerekli, çünkü Claude Code eklentinin `bin/` dizinini `PATH`'e eklemez. `~/.local/bin` `PATH`'te değilse ekleyin.
+Eklentinin kendisi yalnız Markdown'dır (`plugins/gemini-baton/` içinde skill, komut, alt ajan); `baton` CLI'si ayrıca [pipx](https://pipx.pypa.io/stable/installation/) ile kurulur. `~/.local/bin` `PATH`'te değilse `pipx ensurepath` çalıştırın.
 
 Sonra Gemini'nin projene yazmasına izin ver; bu her proje için bir kez yapılır ve önce agy'nin `settings.json` dosyasının yedeği alınır:
 
@@ -74,10 +73,10 @@ baton izin kontrol --yaz "$PWD" --izin-ekle
 Bu kural yoksa alt ajan `İZİN GEREKLİ` ile durur ve eklenmesi gereken kuralı tam olarak yazar; izni hiçbir zaman kendi başına eklemez. Claude Code'u yeniden başlattıktan sonra şunu yaz:
 
 ```text
-/baton:devret src/parser.py'ye girdi doğrulaması ekle; boş metin ValueError fırlatsın. Doğrulama: python3 -m pytest tests/test_parser.py
+/gemini-baton:devret src/parser.py'ye girdi doğrulaması ekle; boş metin ValueError fırlatsın. Doğrulama: python3 -m pytest tests/test_parser.py
 ```
 
-Claude işi `baton:ajan-yonetici` alt ajanına verir. Alt ajan görev dosyasını yazar, Gemini'yi başlatır, bekler, testi kendisi çalıştırır ve `BAŞARILI`, `BAŞARISIZ` ya da `İZİN GEREKLİ` sonucunu değişen dosyalar ve test çıktısıyla birlikte döndürür.
+Claude işi `gemini-baton:ajan-yonetici` alt ajanına verir. Alt ajan görev dosyasını yazar, Gemini'yi başlatır, bekler, testi kendisi çalıştırır ve `BAŞARILI`, `BAŞARISIZ` ya da `İZİN GEREKLİ` sonucunu değişen dosyalar ve test çıktısıyla birlikte döndürür.
 
 ## Kullanım
 
@@ -85,7 +84,7 @@ Claude işi `baton:ajan-yonetici` alt ajanına verir. Alt ajan görev dosyasın�
 
 | Ne yaparsın | Ne olur |
 |---|---|
-| `/baton:devret <iş>` | Alt ajan döngünün tamamını yürütür ve kısa, kanıtlı bir sonuç döndürür. |
+| `/gemini-baton:devret <iş>` | Alt ajan döngünün tamamını yürütür ve kısa, kanıtlı bir sonuç döndürür. |
 | Claude'a "bunu Gemini'ye ver" dersin | `ajan` skill'i devreye girer ve Claude döngüyü kendisi yürütür. |
 | Birbirinden bağımsız birkaç iş verirsin | Claude bunları paralel başlatır. Skill, aynı dosyalara dokunan işleri aynı anda çalıştırmamasını söyler. |
 
@@ -172,6 +171,7 @@ git clone https://github.com/HSGunes/gemini-baton-for-claude-code.git
 cd gemini-baton-for-claude-code
 python3 -m pytest                    # sahte agy; gerçek CLI hiç çağrılmaz
 claude plugin validate --strict .
+claude plugin validate --strict plugins/gemini-baton
 ln -sfn "$PWD/bin/baton" ~/.local/bin/baton   # klonu doğrudan kullan
 ```
 

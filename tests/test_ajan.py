@@ -2091,7 +2091,7 @@ def test_skill_md_frontmatter_tr_ve_en_tetikleyiciler() -> None:
     ve istenen İngilizce tetikleyicileri tek satır geçerli YAML string olarak içermelidir.
     """
     skill_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "skills", "ajan", "SKILL.md")
+        os.path.join(os.path.dirname(__file__), "..", "plugins", "gemini-baton", "skills", "ajan", "SKILL.md")
     )
     content = open(skill_path, "r", encoding="utf-8").read()
     lines = content.splitlines()

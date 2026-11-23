@@ -5,9 +5,9 @@ description: Gemini alt ajanı (`baton`, eski adı `ajan`, `agy` CLI). Uygulama 
 
 # ajan — Gemini alt ajanı
 
-`baton` `PATH`'te olmalı (`bin/baton` → `~/.local/bin/baton` veya `pip install .`; `command -v baton` boşsa bildir). **Claude planlar, görev/ölçüt yazar, doğrular; Gemini (`agy` `stream-json`) uygular.**
+`baton` CLI'si `PATH`'te olmalı. `command -v baton` boşsa kendin kurmaya çalışma; kullanıcıya https://github.com/HSGunes/gemini-baton-for-claude-code#quick-start adresini göster ve dur. **Claude planlar, görev/ölçüt yazar, doğrular; Gemini (`agy` `stream-json`) uygular.**
 
-Ana bağlamı korumak için `baton:ajan-yonetici` (veya `/baton:devret <iş>`) kullan; aşağısı elle akış içindir.
+Ana bağlamı korumak için `gemini-baton:ajan-yonetici` (veya `/gemini-baton:devret <iş>`) kullan; aşağısı elle akış içindir.
 
 ## Modeller
 - Varsayılan otomatik (kullanıcı istemedikçe `--model` verme); mevcut liste için `baton modeller`.

@@ -70,7 +70,7 @@ jobs:
         run: |
           python - <<'EOF'
           import json, tomllib
-          plugin = json.load(open(".claude-plugin/plugin.json"))
+          plugin = json.load(open("plugins/gemini-baton/.claude-plugin/plugin.json"))
           json.load(open(".claude-plugin/marketplace.json"))
           project = tomllib.load(open("pyproject.toml", "rb"))["project"]
           assert plugin["version"] == project["version"], (plugin["version"], project["version"])
@@ -87,3 +87,4 @@ jobs:
         with:
           node-version: "22"
       - run: npx -y @anthropic-ai/claude-code plugin validate --strict .
+      - run: npx -y @anthropic-ai/claude-code plugin validate --strict plugins/gemini-baton
